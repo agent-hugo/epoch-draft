@@ -21,10 +21,16 @@ export interface ClientSnapshot {
   closed?: ClosedMsg;
 }
 
+/** The host gave this player's seat to a bot. */
+export function replacedByBot(s: ClientSnapshot, pid: string): boolean {
+  return !!s.lobby?.players.some((p) => p.id === pid && p.bot);
+}
+
 /** One player's connection to a room. */
 export class Player {
   snapshot: ClientSnapshot = { presence: {}, connected: false };
   private listeners = new Set<(s: ClientSnapshot) => void>();
+  private cleared = false;
 
   constructor(
     private bus: Bus,
@@ -43,7 +49,10 @@ export class Player {
       this.update({ closed: p as ClosedMsg });
       void this.clearOwn();
     });
-    this.bus.subscribe(topics.lobby(this.room), (_t, p) => this.update({ lobby: (p as LobbyMsg) ?? undefined }));
+    this.bus.subscribe(topics.lobby(this.room), (_t, p) => {
+      this.update({ lobby: (p as LobbyMsg) ?? undefined });
+      if (replacedByBot(this.snapshot, this.id)) void this.clearOwn();
+    });
     this.bus.subscribe(topics.publicState(this.room), (_t, p) => this.update({ pub: (p as PublicState) ?? undefined }));
     this.bus.subscribe(topics.hand(this.room, this.id), (_t, p) => this.update({ hand: (p as HandMsg) ?? undefined }));
     this.bus.subscribe(topics.presenceAll(this.room), (t, p) =>
@@ -56,9 +65,14 @@ export class Player {
   }
 
   private async announce() {
-    if (this.snapshot.closed) return;
+    if (this.gone) return;
     await this.bus.publish(topics.presence(this.room, this.id), 'online', true);
     await this.bus.publish(topics.join(this.room, this.id), { name: this.name } satisfies JoinMsg, true);
+  }
+
+  /** The room is closed or this player was replaced: nothing to publish any more. */
+  get gone(): boolean {
+    return !!this.snapshot.closed || replacedByBot(this.snapshot, this.id);
   }
 
   rename(name: string): void {
@@ -86,8 +100,10 @@ export class Player {
     await Promise.all(clear.map((t) => this.bus.publish(t, null, true)));
   }
 
-  /** Removes this player's own retained messages from a closed room. */
+  /** Removes this player's own retained messages once it is out of the room. */
   private async clearOwn(): Promise<void> {
+    if (this.cleared) return;
+    this.cleared = true;
     const r = this.room;
     const own = [topics.join(r, this.id), topics.action(r, this.id), topics.hand(r, this.id), topics.presence(r, this.id)];
     await Promise.all(own.map((t) => this.bus.publish(t, null, true)));

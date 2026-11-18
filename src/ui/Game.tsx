@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
-import type { Db } from '../engine/db';
+import { TURNS_PER_EPOCH, type Db } from '../engine/db';
 import { leftOf, production, rightOf, type PaymentOption } from '../engine/payment';
 import { handOptions, nextStageCost, type CardOptions } from '../engine/rules';
 import { military, ranking, scoreGame, scorePlayer } from '../engine/scoring';
 import type { CardDef, Choice, GameState, PlayerState, ScoreBreakdown } from '../engine/types';
 import type { ClientSnapshot, Player } from '../net/client';
+import type { Host } from '../net/host';
 import { playerView } from '../net/protocol';
 import { Reference } from './Reference';
 import { settings } from './storage';
@@ -26,10 +27,11 @@ interface Props {
   pid: string;
   snap: ClientSnapshot;
   player: Player;
+  host?: Host;
   onLeave: () => void;
 }
 
-export function Game({ db, room, pid, snap, player, onLeave }: Props) {
+export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
   const [tab, setTab] = useState<Tab>('hand');
   // The tab body is the only scrolling element, so the header and the tab bar
   // never leave the screen. Each tab keeps its own scroll position.
@@ -85,7 +87,9 @@ export function Game({ db, room, pid, snap, player, onLeave }: Props) {
         {tab === 'city' && <CityView db={db} state={view} i={i} />}
         {tab === 'others' && <Others db={db} state={view} me={i} />}
         {tab === 'help' && <Reference db={db} highlightCiv={me.civ} />}
-        {tab === 'settings' && <GameSettings room={room} player={player} onLeave={onLeave} />}
+        {tab === 'settings' && (
+          <GameSettings room={room} pid={pid} snap={snap} player={player} host={host} onLeave={onLeave} />
+        )}
       </main>
 
       <nav class="tabs">
@@ -105,20 +109,51 @@ export function Game({ db, room, pid, snap, player, onLeave }: Props) {
   );
 }
 
-function GameSettings({ room, player, onLeave }: { room: string; player: Player; onLeave: () => void }) {
+interface Ask {
+  text: string;
+  ok: string;
+  danger?: boolean;
+  run: () => void;
+}
+
+/** A confirmation dialog over the whole screen. */
+function ConfirmDialog({ ask, onClose }: { ask: Ask; onClose: () => void }) {
+  return (
+    <div class="modal-back" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div class="modal" role="dialog" aria-modal="true">
+        <p>{ask.text}</p>
+        <div class="row end">
+          <button onClick={onClose}>Отмена</button>
+          <button
+            class={ask.danger ? 'danger' : 'primary'}
+            autoFocus
+            onClick={() => {
+              onClose();
+              ask.run();
+            }}
+          >
+            {ask.ok}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GameSettings(props: {
+  room: string;
+  pid: string;
+  snap: ClientSnapshot;
+  player: Player;
+  host?: Host;
+  onLeave: () => void;
+}) {
+  const { room, snap, player, host } = props;
   const [name, setName] = useState(settings.name);
   const [ending, setEnding] = useState(false);
-  const rename = () => {
-    const n = name.trim();
-    if (!n || n === settings.name) return;
-    settings.name = n;
-    player.rename(n);
-  };
-  const end = () => {
-    if (!confirm('Завершить игру для всех? Партия будет удалена, продолжить её будет нельзя.')) return;
-    setEnding(true);
-    void player.endGame().catch(() => setEnding(false));
-  };
+  const [ask, setAsk] = useState<Ask>();
+  const newName = name.trim();
+  const humans = (snap.lobby?.players ?? []).filter((p) => !p.bot && p.id !== snap.lobby?.host);
   return (
     <div class="stack settings-tab">
       <h2>Настройки</h2>
@@ -129,25 +164,95 @@ function GameSettings({ room, player, onLeave }: { room: string; player: Player;
         class="row"
         onSubmit={(e) => {
           e.preventDefault();
-          rename();
+          if (!newName || newName === settings.name) return;
+          setAsk({
+            text: `Сменить имя на «${newName}»? Его увидят все игроки.`,
+            ok: 'Сменить',
+            run: () => {
+              settings.name = newName;
+              player.rename(newName);
+            },
+          });
         }}
       >
         <input value={name} maxLength={24} aria-label="Ваше имя" onInput={(e) => setName(e.currentTarget.value)} />
-        <button type="submit" disabled={!name.trim() || name.trim() === settings.name}>
+        <button type="submit" disabled={!newName || newName === settings.name}>
           Сменить имя
         </button>
       </form>
-      <button onClick={onLeave}>Выйти в меню</button>
+      <button
+        onClick={() =>
+          setAsk({
+            text: 'Выйти в меню? Остальные будут ждать вашего хода, пока вы не вернётесь.',
+            ok: 'Выйти',
+            run: props.onLeave,
+          })
+        }
+      >
+        Выйти в меню
+      </button>
       <p class="small muted">Остальные будут ждать вашего хода, пока вы не вернётесь по коду комнаты.</p>
-      <button class="danger" disabled={ending} onClick={end}>
+
+      {host && humans.length > 0 && (
+        <>
+          <h3>Заменить игрока ботом</h3>
+          <ul class="players">
+            {humans.map((p) => (
+              <li key={p.id}>
+                <span class={`dot ${snap.presence[p.id] ? 'on' : ''}`} />
+                {p.name}
+                <button
+                  class="replace"
+                  onClick={() =>
+                    setAsk({
+                      text: `Заменить игрока ${p.name} ботом до конца игры? Его отключат от партии, вернуться он не сможет.`,
+                      ok: 'Заменить',
+                      danger: true,
+                      run: () => host.replaceWithBot(p.id),
+                    })
+                  }
+                >
+                  🤖 Заменить
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p class="small muted">Пригодится, если кто-то ушёл и игра его ждёт.</p>
+        </>
+      )}
+
+      <button
+        class="danger"
+        disabled={ending}
+        onClick={() =>
+          setAsk({
+            text: 'Завершить игру для всех? Партия будет удалена, продолжить её будет нельзя.',
+            ok: 'Завершить',
+            danger: true,
+            run: () => {
+              setEnding(true);
+              void player.endGame().catch(() => setEnding(false));
+            },
+          })
+        }
+      >
         {ending ? 'Завершаем…' : 'Завершить игру для всех'}
       </button>
       <p class="small muted">Удаляет партию у всех участников. Нажать может любой игрок.</p>
       <a class="small" href="https://github.com/agent-hugo/epoch-draft" target="_blank" rel="noopener">
         Проект на GitHub
       </a>
+      {ask && <ConfirmDialog ask={ask} onClose={() => setAsk(undefined)} />}
     </div>
   );
+}
+
+/** Where this hand goes after the turn: epochs I and III pass left, II right. */
+function passText(view: GameState, i: number): string {
+  if (view.turn >= TURNS_PER_EPOCH) return 'Последний ход эпохи: оставшаяся карта уйдёт в сброс.';
+  const n = view.players.length;
+  if (view.epoch === 2) return `После хода рука перейдёт вправо ▶ ${view.players[rightOf(n, i)]!.name}`;
+  return `После хода рука перейдёт влево ◀ ${view.players[leftOf(n, i)]!.name}`;
 }
 
 function HandTab(props: {
@@ -189,6 +294,7 @@ function HandTab(props: {
       {pendingSend && !props.error && <div class="banner">Отправляем…</div>}
       {props.error && <div class="banner warn">Ход не принят: {props.error}</div>}
 
+      <div class="pass small muted">{passText(view, i)}</div>
       <div class="monument small">
         <b>{civ.monument.name}</b>: стадия {me.stages}/3
         {stageCost && (

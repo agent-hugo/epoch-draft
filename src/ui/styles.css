@@ -510,3 +510,40 @@ button.danger {
 a {
   color: var(--accent);
 }
+
+/* confirmation dialog */
+.modal-back {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.5);
+}
+.modal {
+  width: 100%;
+  max-width: 360px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+}
+.modal p {
+  margin: 0 0 16px;
+}
+.row.end {
+  justify-content: flex-end;
+}
+.settings-tab h3 {
+  margin: 0.75rem 0 0;
+}
+.players .replace {
+  margin-left: auto;
+  padding: 4px 10px;
+}
+.pass {
+  margin-top: 4px;
+}

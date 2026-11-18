@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { gameData } from '../data';
 import { Db } from '../engine/db';
-import { Player, type ClientSnapshot } from '../net/client';
+import { Player, replacedByBot, type ClientSnapshot } from '../net/client';
 import { Host } from '../net/host';
 import { Bus } from '../net/mqtt';
 import { normalizeRoom, randomRoomCode, topics } from '../net/protocol';
@@ -209,8 +209,8 @@ function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; on
     return () => {
       alive = false;
       unsub();
-      // In a closed room the player has already removed its retained messages.
-      const bye = player.snapshot.closed ? Promise.resolve() : bus.publish(topics.presence(room, pid), 'offline', true);
+      // A player out of the room has already removed its retained messages.
+      const bye = player.gone ? Promise.resolve() : bus.publish(topics.presence(room, pid), 'offline', true);
       void bye.finally(() => bus.end());
     };
   }, [room, pid]);
@@ -243,9 +243,21 @@ function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; on
         </button>
       </main>
     );
+  else if (snap && replacedByBot(snap, pid))
+    body = (
+      <main class="screen narrow">
+        <h1>Вас заменили ботом</h1>
+        <p class="muted">Хост отдал ваше место в комнате {room} боту, игра продолжается без вас.</p>
+        <button class="primary" onClick={onLeave}>
+          В меню
+        </button>
+      </main>
+    );
   else if (!conn || !snap) body = <main class="screen narrow muted">Подключение…</main>;
   else if (snap.lobby?.started && snap.pub)
-    body = <Game db={db} room={room} pid={pid} snap={snap} player={conn.player} onLeave={onLeave} />;
+    body = (
+      <Game db={db} room={room} pid={pid} snap={snap} player={conn.player} host={conn.host} onLeave={onLeave} />
+    );
   else
     body = (
       <Lobby

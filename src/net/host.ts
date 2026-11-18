@@ -75,7 +75,8 @@ export class Host {
     const name = msg.name.trim().slice(0, 24) || 'Игрок';
     const existing = this.lobby.players.find((p) => p.id === pid);
     if (existing) {
-      if (existing.name === name) return;
+      // A player replaced by a bot is out of the game for good.
+      if (existing.bot || existing.name === name) return;
       existing.name = name;
       if (this.game) {
         const gp = this.game.players.find((p) => p.id === pid);
@@ -103,6 +104,26 @@ export class Host {
     this.lobby.players = this.lobby.players.filter((p) => p.id !== pid);
     this.bots.delete(pid);
     void this.publishAll();
+  }
+
+  /**
+   * Hands a player's seat to a bot for the rest of the game. The player is
+   * dropped: their hand is no longer published and their moves are ignored.
+   */
+  replaceWithBot(pid: string): void {
+    const g = this.game;
+    const lp = this.lobby.players.find((p) => p.id === pid);
+    if (this.closed || !g || g.phase !== 'play' || pid === this.lobby.host || !lp || lp.bot) return;
+    lp.bot = true;
+    lp.name = `🤖 ${lp.name}`;
+    const gp = g.players.find((p) => p.id === pid);
+    if (gp) gp.name = lp.name;
+    this.bots.set(pid, this.makeBot(pid));
+    this.errors.delete(pid);
+    this.runBots();
+    void this.publishAll();
+    void this.bus.publish(topics.hand(this.room, pid), null, true);
+    void this.bus.publish(topics.action(this.room, pid), null, true);
   }
 
   canStart(): boolean {
