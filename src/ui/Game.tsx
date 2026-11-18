@@ -143,6 +143,9 @@ function GameSettings({ room, player, onLeave }: { room: string; player: Player;
         {ending ? 'Завершаем…' : 'Завершить игру для всех'}
       </button>
       <p class="small muted">Удаляет партию у всех участников. Нажать может любой игрок.</p>
+      <a class="small" href="https://github.com/agent-hugo/epoch-draft" target="_blank" rel="noopener">
+        Проект на GitHub
+      </a>
     </div>
   );
 }
