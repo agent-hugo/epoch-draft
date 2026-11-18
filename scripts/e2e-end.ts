@@ -71,6 +71,10 @@ try {
   await host.goto(base);
   await host.getByRole('button', { name: /Справка по игре/ }).click();
   check((await openSections(host)) === 0, 'help sections must start collapsed');
+  await host.getByText('Правила игры', { exact: true }).click();
+  await host.getByText(/Все ходят одновременно/).waitFor();
+  await shot(host, 'e1-rules');
+  await host.getByText('Правила игры', { exact: true }).click();
   await host.getByText('Значки', { exact: true }).click();
   await shot(host, 'e1-help-login');
   await host.getByRole('button', { name: 'Закрыть' }).click();

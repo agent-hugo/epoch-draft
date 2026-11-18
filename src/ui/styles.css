@@ -457,6 +457,10 @@ button.icon {
   margin: 0;
   padding-left: 18px;
 }
+.rules-list ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
 .rules-list li {
   margin-bottom: 6px;
 }
