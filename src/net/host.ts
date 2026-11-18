@@ -1,0 +1,163 @@
+import { greedyBot, type Bot } from '../engine/bots';
+import type { Db } from '../engine/db';
+import { MAX_PLAYERS, MIN_PLAYERS } from '../engine/db';
+import { choose, createGame, playerIndex, RuleError, waitingFor } from '../engine/rules';
+import type { GameState } from '../engine/types';
+import type { Bus } from './mqtt';
+import {
+  lastLevel,
+  publicView,
+  randomId,
+  topics,
+  type ActionMsg,
+  type HandMsg,
+  type HostSnapshot,
+  type JoinMsg,
+  type LobbyMsg,
+} from './protocol';
+
+const BOT_NAMES = ['Бот Хаммурапи', 'Бот Клеопатра', 'Бот Конфуций', 'Бот Перикл', 'Бот Цезарь'];
+
+/**
+ * Authoritative game host. Runs in the browser of the player who created
+ * the room; all state changes go through it and are published as retained
+ * messages.
+ */
+export class Host {
+  lobby: LobbyMsg;
+  game?: GameState;
+  private bots = new Map<string, Bot>();
+  private errors = new Map<string, string>();
+
+  constructor(
+    private db: Db,
+    private bus: Bus,
+    private room: string,
+    hostPlayerId: string,
+  ) {
+    this.lobby = { host: hostPlayerId, players: [], started: false };
+  }
+
+  /** Restores a previous session from the broker (if any) and starts listening. */
+  async start(): Promise<void> {
+    const snapshot = await new Promise<HostSnapshot | null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), 1500);
+      this.bus.subscribe(topics.hostState(this.room), (_t, payload) => {
+        clearTimeout(timer);
+        resolve((payload as HostSnapshot | null) ?? null);
+      });
+    });
+    if (snapshot && snapshot.lobby.host === this.lobby.host) {
+      this.lobby = snapshot.lobby;
+      this.game = snapshot.game;
+    }
+    for (const p of this.lobby.players) if (p.bot) this.bots.set(p.id, this.makeBot(p.id));
+    this.bus.subscribe(topics.joinAll(this.room), (topic, payload) => this.onJoin(lastLevel(topic), payload as JoinMsg | null));
+    this.bus.subscribe(topics.actionAll(this.room), (topic, payload) =>
+      this.onAction(lastLevel(topic), payload as ActionMsg | null),
+    );
+    await this.publishAll();
+  }
+
+  private makeBot(id: string): Bot {
+    let seed = 0;
+    for (const ch of id) seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+    return greedyBot(seed);
+  }
+
+  private onJoin(pid: string, msg: JoinMsg | null) {
+    if (!msg || typeof msg.name !== 'string') return;
+    const name = msg.name.trim().slice(0, 24) || 'Игрок';
+    const existing = this.lobby.players.find((p) => p.id === pid);
+    if (existing) {
+      if (existing.name === name) return;
+      existing.name = name;
+      if (this.game) {
+        const gp = this.game.players.find((p) => p.id === pid);
+        if (gp) gp.name = name;
+      }
+    } else {
+      if (this.lobby.started || this.lobby.players.length >= MAX_PLAYERS) return;
+      this.lobby.players.push({ id: pid, name });
+    }
+    void this.publishAll();
+  }
+
+  addBot(): void {
+    if (this.lobby.started || this.lobby.players.length >= MAX_PLAYERS) return;
+    const id = `bot-${randomId().slice(0, 6)}`;
+    const used = new Set(this.lobby.players.map((p) => p.name));
+    const name = BOT_NAMES.find((n) => !used.has(n)) ?? `Бот ${this.lobby.players.length + 1}`;
+    this.lobby.players.push({ id, name, bot: true });
+    this.bots.set(id, this.makeBot(id));
+    void this.publishAll();
+  }
+
+  removePlayer(pid: string): void {
+    if (this.lobby.started || pid === this.lobby.host) return;
+    this.lobby.players = this.lobby.players.filter((p) => p.id !== pid);
+    this.bots.delete(pid);
+    void this.publishAll();
+  }
+
+  canStart(): boolean {
+    const n = this.lobby.players.length;
+    return !this.lobby.started && n >= MIN_PLAYERS && n <= MAX_PLAYERS;
+  }
+
+  startGame(): void {
+    if (!this.canStart()) return;
+    const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
+    // Random seating.
+    const seats = this.lobby.players.slice().sort(() => Math.random() - 0.5);
+    this.game = createGame(this.db, { seed, players: seats.map((p) => ({ id: p.id, name: p.name })) });
+    this.lobby.started = true;
+    this.runBots();
+    void this.publishAll();
+  }
+
+  private onAction(pid: string, msg: ActionMsg | null) {
+    const g = this.game;
+    if (!msg || !g || g.phase !== 'play') return;
+    if (msg.epoch !== g.epoch || msg.turn !== g.turn) return;
+    if (!g.players.some((p) => p.id === pid) || this.bots.has(pid)) return;
+    const prev = g.pending[pid];
+    if (prev && JSON.stringify(prev) === JSON.stringify(msg.choice)) return;
+    try {
+      this.game = choose(this.db, g, pid, msg.choice);
+      this.errors.delete(pid);
+    } catch (e) {
+      if (!(e instanceof RuleError)) throw e;
+      this.errors.set(pid, e.message);
+    }
+    this.runBots();
+    void this.publishAll();
+  }
+
+  private runBots() {
+    while (this.game && this.game.phase === 'play') {
+      const botId = waitingFor(this.game).find((id) => this.bots.has(id));
+      if (!botId) return;
+      const i = playerIndex(this.game, botId);
+      this.game = choose(this.db, this.game, botId, this.bots.get(botId)!(this.db, this.game, i));
+    }
+  }
+
+  private async publishAll(): Promise<void> {
+    const pubs: Promise<void>[] = [this.bus.publish(topics.lobby(this.room), this.lobby, true)];
+    const g = this.game;
+    if (g) {
+      pubs.push(this.bus.publish(topics.publicState(this.room), publicView(g), true));
+      for (const p of g.players) {
+        if (this.bots.has(p.id)) continue;
+        const msg: HandMsg = { epoch: g.epoch, turn: g.turn, hand: p.hand, chosen: g.pending[p.id] };
+        const err = this.errors.get(p.id);
+        if (err) msg.error = err;
+        pubs.push(this.bus.publish(topics.hand(this.room, p.id), msg, true));
+      }
+    }
+    const snapshot: HostSnapshot = { lobby: this.lobby, game: g };
+    pubs.push(this.bus.publish(topics.hostState(this.room), snapshot, true));
+    await Promise.all(pubs);
+  }
+}

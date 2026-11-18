@@ -6,12 +6,20 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "sim": "tsx scripts/simulate.ts"
+    "sim": "tsx scripts/simulate.ts",
+    "net-smoke": "tsx scripts/net-smoke.ts"
   },
   "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
     "@types/node": "^26.6.6",
+    "playwright": "^1.65.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
+    "vite": "^8.3.8",
     "vitest": "^5.1.1"
+  },
+  "dependencies": {
+    "mqtt": "^5.16.1",
+    "preact": "^11.2.0"
   }
 }
