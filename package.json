@@ -7,7 +7,11 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "sim": "tsx scripts/simulate.ts",
-    "net-smoke": "tsx scripts/net-smoke.ts"
+    "net-smoke": "tsx scripts/net-smoke.ts",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "e2e": "tsx scripts/e2e-ui.ts"
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.6",
