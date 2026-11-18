@@ -58,9 +58,12 @@ async function join(name: string, room: string): Promise<Page> {
   return p;
 }
 
-async function sellFirst(page: Page) {
+async function sellFirst(page: Page, screenshot?: string) {
   await page.locator('.cards .card-head').first().click();
   await page.getByRole('button', { name: 'Продать за 3🪙' }).click();
+  await page.getByRole('dialog').getByText(/Продать «.+»\?/).waitFor();
+  if (screenshot) await shot(page, screenshot);
+  await confirm(page, 'Подтвердить');
 }
 
 const openSections = (p: Page) => p.locator('.reference details[open]').count();
@@ -118,11 +121,31 @@ try {
   await shot(third, 'e0-replaced');
   check((await host.locator('.settings-tab .players li').count()) === 1, 'replaced player must leave the list');
   await host.getByRole('button', { name: 'Рука' }).click();
-  await sellFirst(host);
+  // Cancelling the move confirmation keeps the hand unchosen.
+  await guest.locator('.cards .card-head').first().click();
+  await guest.getByRole('button', { name: 'Продать за 3🪙' }).click();
+  await confirm(guest, false);
+  check(!(await guest.locator('.banner.ok').isVisible()), 'cancelled move must not be sent');
+  await guest.locator('.cards .card-head').first().click(); // the card stays open after cancel
+  await sellFirst(host, 'e0-move-confirm');
+  await host.locator('.banner.ok').waitFor();
   await sellFirst(guest);
   for (const p of [host, guest]) await p.locator('.bar', { hasText: 'ход 2/6' }).waitFor({ timeout: 10000 });
+
+  // After the turn everybody sees what each player did.
+  const summary = host.getByRole('dialog', { name: 'Итоги хода' });
+  await summary.waitFor();
+  const text = await summary.innerText();
+  check(/Итоги хода 1/.test(text) && /Вы\s+продали «/.test(text) && /Петя\s+продал\(а\) карту за 3🪙/.test(text), `summary: ${text}`);
+  check(/🤖 Вася/.test(text), `summary must list the bot: ${text}`);
+  await shot(host, 'e0-summary');
+  for (const p of [host, guest]) await p.getByRole('dialog', { name: 'Итоги хода' }).getByRole('button', { name: 'Дальше' }).click();
   await host.getByRole('button', { name: 'Соседи' }).click();
   await host.locator('.other summary', { hasText: '🤖 Вася' }).waitFor();
+  await shot(host, 'e0-others');
+  const petya = host.locator('.other', { has: host.locator('summary', { hasText: 'Петя' }) });
+  const last = await petya.locator('.last-action').innerText({ timeout: 5000 });
+  check(/Последний ход \(I, 1\): продал\(а\) карту/.test(last), `last action in the neighbours tab: ${last}`);
 
   // Help tab keeps its sections across tab switches.
   await guest.getByRole('button', { name: 'Справка' }).click();

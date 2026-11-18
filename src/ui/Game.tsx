@@ -1,9 +1,10 @@
+import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { TURNS_PER_EPOCH, type Db } from '../engine/db';
 import { leftOf, production, rightOf, type PaymentOption } from '../engine/payment';
-import { handOptions, nextStageCost, type CardOptions } from '../engine/rules';
+import { DEFEAT_POINTS, handOptions, nextStageCost, SELL_COINS, VICTORY_POINTS, type CardOptions } from '../engine/rules';
 import { military, ranking, scoreGame, scorePlayer } from '../engine/scoring';
-import type { CardDef, Choice, GameState, PlayerState, ScoreBreakdown } from '../engine/types';
+import type { CardDef, Choice, GameState, LogEntry, PlayerState, ScoreBreakdown } from '../engine/types';
 import type { ClientSnapshot, Player } from '../net/client';
 import type { Host } from '../net/host';
 import { playerView } from '../net/protocol';
@@ -49,6 +50,18 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
   const view = playerView(pub, pid, handFresh ? snap.hand!.hand : []);
   const i = view.players.findIndex((p) => p.id === pid);
   const hostOnline = snap.lobby ? snap.presence[snap.lobby.host] !== false : true;
+
+  // After every resolved turn show what everybody did. Turns resolved before
+  // this screen was opened (e.g. before a reload) are not shown.
+  const last = pub.log[pub.log.length - 1];
+  const lastKey = last ? `${last.epoch}-${last.turn}` : '';
+  const seenTurn = useRef(lastKey);
+  const [summary, setSummary] = useState(false);
+  useEffect(() => {
+    if (lastKey === seenTurn.current) return;
+    seenTurn.current = lastKey;
+    setSummary(true);
+  }, [lastKey]);
 
   if (i < 0) return <Spectator db={db} state={view} onLeave={onLeave} />;
   if (pub.phase === 'over') return <Final db={db} state={view} me={i} onLeave={onLeave} />;
@@ -105,12 +118,133 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
           </button>
         ))}
       </nav>
+      {summary && <TurnSummary db={db} state={view} pid={pid} onClose={() => setSummary(false)} />}
+    </div>
+  );
+}
+
+/** Entries of the last resolved turn. */
+function lastTurnLog(log: LogEntry[]): LogEntry[] {
+  const last = log[log.length - 1];
+  return last ? log.filter((e) => e.epoch === last.epoch && e.turn === last.turn) : [];
+}
+
+/**
+ * What a player did, as everybody sees it. As in the board game, the card
+ * spent on a monument stage or sold stays hidden from the other players.
+ */
+function ActionText({ db, state, e, pid }: { db: Db; state: GameState; e: LogEntry; pid: string }) {
+  const n = state.players.length;
+  const k = state.players.findIndex((p) => p.id === e.player);
+  const mine = e.player === pid;
+  const card = db.card(e.card);
+  const paid = [];
+  if (e.left) paid.push(`${e.left}🪙 ◀ ${state.players[leftOf(n, k)]!.name}`);
+  if (e.right) paid.push(`${e.right}🪙 ▶ ${state.players[rightOf(n, k)]!.name}`);
+  const pay = e.paid ? (
+    <span class="muted">
+      {' '}
+      · {mine ? 'заплатили' : 'заплатил(а)'} {e.paid}🪙{paid.length ? `, из них ${paid.join(', ')}` : ''}
+    </span>
+  ) : null;
+  if (e.action === 'build')
+    return (
+      <>
+        {mine ? 'построили' : 'построил(а)'} <b class={`chip t-${card.type}`}>{card.name}</b>
+        {pay}
+        <div class="small muted">{effectsText(card.effects)}</div>
+      </>
+    );
+  if (e.action === 'stage') {
+    const stageNo = state.log.slice(0, state.log.indexOf(e) + 1).filter((x) => x.player === e.player && x.action === 'stage').length;
+    const stage = db.civ(state.players[k]!.civ).monument.stages[stageNo - 1];
+    return (
+      <>
+        {mine ? 'возвели' : 'возвёл(а)'} 🏛️ стадию {stageNo} сооружения{mine && ` картой «${card.name}»`}
+        {pay}
+        {stage && <div class="small muted">{effectsText(stage.effects)}</div>}
+      </>
+    );
+  }
+  return (
+    <>
+      {mine ? `продали «${card.name}»` : 'продал(а) карту'} за {SELL_COINS}🪙
+    </>
+  );
+}
+
+/** Conflict results between every pair of neighbours (the state right after the epoch ended). */
+function ConflictResults({ db, state, epoch }: { db: Db; state: GameState; epoch: 1 | 2 | 3 }) {
+  const n = state.players.length;
+  const pairs = state.players.map((_, a) => [a, rightOf(n, a)] as const);
+  return (
+    <ul class="summary-list">
+      {pairs.map(([a, b]) => {
+        const pa = military(db, state, a);
+        const pb = military(db, state, b);
+        const A = state.players[a]!.name;
+        const B = state.players[b]!.name;
+        const res =
+          pa === pb
+            ? 'ничья'
+            : pa > pb
+              ? `${A} +${VICTORY_POINTS[epoch]}⭐, ${B} −${-DEFEAT_POINTS}⭐`
+              : `${B} +${VICTORY_POINTS[epoch]}⭐, ${A} −${-DEFEAT_POINTS}⭐`;
+        return (
+          <li key={a}>
+            {A} {pa}⚔️ : {pb}⚔️ {B} → {res}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** The screen shown after each turn: what every player did. */
+function TurnSummary({ db, state, pid, onClose }: { db: Db; state: GameState; pid: string; onClose: () => void }) {
+  const entries = lastTurnLog(state.log);
+  const first = entries[0];
+  if (!first) return null;
+  const n = state.players.length;
+  const me = state.players.findIndex((p) => p.id === pid);
+  // Me first, then around the table.
+  const order = state.players.map((_, k) => (me + k) % n);
+  return (
+    <div class="modal-back" onClick={(ev) => ev.target === ev.currentTarget && onClose()}>
+      <div class="modal summary" role="dialog" aria-modal="true" aria-label="Итоги хода">
+        <h3>
+          Итоги хода {first.turn} · эпоха {EPOCH_NAME[first.epoch]}
+        </h3>
+        <ul class="summary-list">
+          {order.map((k) => {
+            const p = state.players[k]!;
+            const e = entries.find((x) => x.player === p.id);
+            return (
+              <li key={p.id}>
+                <b>{k === me ? 'Вы' : p.name}</b>{' '}
+                {e ? <ActionText db={db} state={state} e={e} pid={pid} /> : <span class="muted">—</span>}
+              </li>
+            );
+          })}
+        </ul>
+        {first.turn === TURNS_PER_EPOCH && (
+          <>
+            <h3>Конфликты эпохи {EPOCH_NAME[first.epoch]}</h3>
+            <ConflictResults db={db} state={state} epoch={first.epoch} />
+          </>
+        )}
+        <div class="row end">
+          <button class="primary" autoFocus onClick={onClose}>
+            Дальше
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
 interface Ask {
-  text: string;
+  text: ComponentChildren;
   ok: string;
   danger?: boolean;
   run: () => void;
@@ -121,7 +255,7 @@ function ConfirmDialog({ ask, onClose }: { ask: Ask; onClose: () => void }) {
   return (
     <div class="modal-back" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div class="modal" role="dialog" aria-modal="true">
-        <p>{ask.text}</p>
+        <div class="modal-body">{ask.text}</div>
         <div class="row end">
           <button onClick={onClose}>Отмена</button>
           <button
@@ -267,10 +401,12 @@ function HandTab(props: {
   const { db, view, i, chosen } = props;
   const [open, setOpen] = useState<string>();
   const [sent, setSent] = useState<Choice>();
+  const [ask, setAsk] = useState<Ask>();
   const key = `${view.epoch}-${view.turn}`;
   useEffect(() => {
     setOpen(undefined);
     setSent(undefined);
+    setAsk(undefined);
   }, [key]);
 
   if (!props.ready) return <p class="muted">Получаем карты…</p>;
@@ -321,16 +457,62 @@ function HandTab(props: {
                   o={o}
                   hasStage={!!stageCost}
                   stageNo={me.stages + 1}
-                  onChoose={(c) => {
-                    choose(c);
-                    setOpen(undefined);
-                  }}
+                  onChoose={(c, pay) =>
+                    setAsk({
+                      text: <ChoiceText db={db} me={me} o={o} choice={c} pay={pay} />,
+                      ok: 'Подтвердить',
+                      run: () => {
+                        choose(c);
+                        setOpen(undefined);
+                      },
+                    })
+                  }
                 />
               )}
             </li>
           );
         })}
       </ul>
+      {ask && <ConfirmDialog ask={ask} onClose={() => setAsk(undefined)} />}
+    </div>
+  );
+}
+
+/** The move being confirmed: what is done with the card and what it costs. */
+function ChoiceText(props: { db: Db; me: PlayerState; o: CardOptions; choice: Choice; pay?: PaymentOption }) {
+  const { db, me, o, choice, pay } = props;
+  const card = db.card(choice.card);
+  const chain = choice.action === 'build' && o.chain;
+  const cost = choice.action === 'stage' ? nextStageCost(db, me) : card.cost;
+  const price = (
+    <>
+      <div>Цена: {chain ? 'бесплатно по цепочке' : cost ? costText(cost) : '—'}</div>
+      {!chain && pay && pay.total > 0 && <div>Платите: {payLabel(pay)}</div>}
+    </>
+  );
+  if (choice.action === 'sell')
+    return (
+      <div class="choice-text">
+        <b>Продать «{card.name}»?</b>
+        <div>Карта уйдёт в сброс, вы получите {SELL_COINS}🪙.</div>
+      </div>
+    );
+  if (choice.action === 'stage') {
+    const stage = db.civ(me.civ).monument.stages[me.stages]!;
+    return (
+      <div class="choice-text">
+        <b>Построить стадию {me.stages + 1} сооружения?</b>
+        <div>Стадия даст: {effectsText(stage.effects)}</div>
+        {price}
+        <div class="small muted">Карта «{card.name}» уйдёт на стадию, её эффект не сработает.</div>
+      </div>
+    );
+  }
+  return (
+    <div class="choice-text">
+      <b>Построить «{card.name}»?</b>
+      <div>Эффект: {effectsText(card.effects)}</div>
+      <div>Оплата: {price}</div>
     </div>
   );
 }
@@ -374,7 +556,7 @@ function CardActions(props: {
   o: CardOptions;
   hasStage: boolean;
   stageNo: number;
-  onChoose: (c: Choice) => void;
+  onChoose: (c: Choice, pay?: PaymentOption) => void;
 }) {
   const { o, me } = props;
   const built = me.city.includes(o.card);
@@ -386,7 +568,7 @@ function CardActions(props: {
         <div class="small muted">Построить нельзя: не хватает ресурсов или монет.</div>
       ) : (
         o.build.slice(0, 3).map((p, k) => (
-          <button key={`b${k}`} class="primary" onClick={() => props.onChoose({ action: 'build', card: o.card, trade: p.trade })}>
+          <button key={`b${k}`} class="primary" onClick={() => props.onChoose({ action: 'build', card: o.card, trade: p.trade }, p)}>
             Построить{o.build.length > 1 || p.total ? `: ${payLabel(p)}` : ''}
           </button>
         ))
@@ -394,7 +576,7 @@ function CardActions(props: {
       {props.hasStage &&
         (o.stage.length ? (
           o.stage.slice(0, 2).map((p, k) => (
-            <button key={`s${k}`} onClick={() => props.onChoose({ action: 'stage', card: o.card, trade: p.trade })}>
+            <button key={`s${k}`} onClick={() => props.onChoose({ action: 'stage', card: o.card, trade: p.trade }, p)}>
               Стадия {props.stageNo}
               {p.total ? `: ${payLabel(p)}` : ''}
             </button>
@@ -464,6 +646,7 @@ function ScoreLine({ s }: { s: ScoreBreakdown }) {
 }
 
 function Others({ db, state, me }: { db: Db; state: GameState; me: number }) {
+  const pid = state.players[me]?.id ?? '';
   const n = state.players.length;
   const order = [leftOf(n, me), rightOf(n, me), ...state.players.map((_, k) => k)].filter(
     (k, idx, arr) => k !== me && arr.indexOf(k) === idx,
@@ -481,6 +664,7 @@ function Others({ db, state, me }: { db: Db; state: GameState; me: number }) {
                 {p.coins}🪙 {military(db, state, k)}⚔️ {p.stages}/3🏛️
               </span>
             </summary>
+            <LastAction db={db} state={state} k={k} pid={pid} />
             <div class="small">Продаёт: {resList(production(db, p, true).fixed) || '—'}{' '}
               {production(db, p, true).choices.map((c) => c.map((r) => RES_ICON[r]).join('/')).join(' ')}
             </div>
@@ -496,6 +680,17 @@ function Others({ db, state, me }: { db: Db; state: GameState; me: number }) {
           </details>
         );
       })}
+    </div>
+  );
+}
+
+function LastAction({ db, state, k, pid }: { db: Db; state: GameState; k: number; pid: string }) {
+  const id = state.players[k]!.id;
+  const e = [...state.log].reverse().find((x) => x.player === id);
+  if (!e) return null;
+  return (
+    <div class="small last-action">
+      Последний ход ({EPOCH_NAME[e.epoch]}, {e.turn}): <ActionText db={db} state={state} e={e} pid={pid} />
     </div>
   );
 }

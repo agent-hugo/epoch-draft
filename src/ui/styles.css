@@ -535,8 +535,30 @@ a {
   background: var(--surface);
   color: var(--text);
 }
-.modal p {
+.modal-body {
   margin: 0 0 16px;
+}
+.choice-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.modal.summary {
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+.modal h3 {
+  margin: 0 0 8px;
+}
+.summary-list {
+  margin: 0 0 16px;
+  padding-left: 18px;
+}
+.summary-list li {
+  margin-bottom: 6px;
+}
+.last-action {
+  margin: 4px 0;
 }
 .row.end {
   justify-content: flex-end;

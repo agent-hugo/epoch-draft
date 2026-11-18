@@ -104,7 +104,11 @@ export interface LogEntry {
   player: string;
   action: Choice['action'];
   card: string;
+  /** Coins paid in total, including the coins paid to neighbours. */
   paid: number;
+  /** Coins paid to the left / right neighbour for resources. */
+  left?: number;
+  right?: number;
 }
 
 export interface GameState {

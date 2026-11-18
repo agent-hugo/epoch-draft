@@ -3,7 +3,7 @@ import { checkPayment, leftOf, paymentOptions, rightOf } from './payment';
 import type { PaymentOption } from './payment';
 import { Rng } from './rng';
 import { count, military } from './scoring';
-import type { Choice, Cost, Epoch, GameState, PlayerState, Trade } from './types';
+import type { Choice, Cost, Epoch, GameState, LogEntry, PlayerState, Trade } from './types';
 
 export const START_COINS = 3;
 export const SELL_COINS = 3;
@@ -175,6 +175,8 @@ function resolveTurn(db: Db, state: GameState): void {
     const choice = state.pending[p.id]!;
     p.hand.splice(p.hand.indexOf(choice.card), 1);
     let paid = 0;
+    let toLeft = 0;
+    let toRight = 0;
     if (choice.action === 'sell') {
       delta[i]! += SELL_COINS;
       state.discard.push(choice.card);
@@ -185,13 +187,18 @@ function resolveTurn(db: Db, state: GameState): void {
         const r = checkPayment(db, state, i, cost, choice.trade);
         if ('error' in r) throw new Error(`payment became invalid: ${r.error}`);
         paid = r.total;
+        toLeft = r.left;
+        toRight = r.right;
         delta[i]! -= r.total;
         delta[leftOf(n, i)]! += r.left;
         delta[rightOf(n, i)]! += r.right;
       }
       newlyBuilt.push({ i, effects: stageOrCardEffects(db, p, choice) });
     }
-    state.log.push({ epoch: state.epoch, turn: state.turn, player: p.id, action: choice.action, card: choice.card, paid });
+    const entry: LogEntry = { epoch: state.epoch, turn: state.turn, player: p.id, action: choice.action, card: choice.card, paid };
+    if (toLeft) entry.left = toLeft;
+    if (toRight) entry.right = toRight;
+    state.log.push(entry);
   });
 
   for (const b of newlyBuilt) {

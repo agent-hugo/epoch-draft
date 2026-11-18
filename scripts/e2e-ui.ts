@@ -63,6 +63,11 @@ try {
   while (!(await done(host)) || !(await done(guest))) {
     for (const p of pages) {
       if (await done(p)) continue;
+      const summary = p.getByRole('dialog', { name: 'Итоги хода' });
+      if (await summary.isVisible()) {
+        if (moves > 20 && moves < 25) await shot(p, '4-summary');
+        await summary.getByRole('button', { name: 'Дальше' }).click();
+      }
       const turnKey = await p.locator('.bar').textContent();
       if (await p.locator('.banner.ok').isVisible()) continue; // already chose this turn
       const cards = p.locator('.cards .card');
@@ -76,6 +81,8 @@ try {
         if (await build.count()) {
           if (moves === 3) await shot(p, '3-actions');
           await build.first().click();
+          if (moves === 3) await shot(p, '3-confirm');
+          await p.getByRole('dialog').getByRole('button', { name: 'Подтвердить' }).click();
           picked = true;
         } else {
           await cards.nth(k).locator('.card-head').click();
@@ -84,6 +91,7 @@ try {
       if (!picked) {
         await cards.first().locator('.card-head').click();
         await cards.first().getByRole('button', { name: /^Продать/ }).click();
+        await p.getByRole('dialog').getByRole('button', { name: 'Подтвердить' }).click();
       }
       moves++;
       await p.waitForFunction(
