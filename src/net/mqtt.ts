@@ -22,6 +22,7 @@ export class Bus {
       protocolVersion: 5,
       clean: true,
       reconnectPeriod: 2000,
+      keepalive: 15, // notice a dead link within ~20 s (phones sleep, Wi-Fi drops)
       connectTimeout: 10000,
       clientId: `ed-${Math.random().toString(16).slice(2, 12)}`,
       will: opts.will

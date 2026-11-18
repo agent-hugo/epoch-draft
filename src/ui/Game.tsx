@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { Db } from '../engine/db';
 import { leftOf, production, rightOf, type PaymentOption } from '../engine/payment';
 import { handOptions, nextStageCost, type CardOptions } from '../engine/rules';
@@ -21,6 +21,17 @@ interface Props {
 
 export function Game({ db, pid, snap, player, onLeave }: Props) {
   const [tab, setTab] = useState<Tab>('hand');
+  // The tab body is the only scrolling element, so the header and the tab bar
+  // never leave the screen. Each tab keeps its own scroll position.
+  const body = useRef<HTMLElement>(null);
+  const scrollPos = useRef<Partial<Record<Tab, number>>>({});
+  const switchTab = (t: Tab) => {
+    if (body.current) scrollPos.current[tab] = body.current.scrollTop;
+    setTab(t);
+  };
+  useLayoutEffect(() => {
+    if (body.current) body.current.scrollTop = scrollPos.current[tab] ?? 0;
+  }, [tab]);
   const pub = snap.pub!;
   const handFresh = snap.hand && snap.hand.epoch === pub.epoch && snap.hand.turn === pub.turn;
   const view = playerView(pub, pid, handFresh ? snap.hand!.hand : []);
@@ -49,7 +60,7 @@ export function Game({ db, pid, snap, player, onLeave }: Props) {
       {snap.connected && !hostOnline && <div class="banner warn">Хост не в сети: игра продолжится, когда он вернётся.</div>}
       <div class="waiting small muted">{waiting.length ? `Ждём: ${waiting.join(', ')}` : 'Все сделали выбор'}</div>
 
-      <main class="tab-body">
+      <main class="tab-body" ref={body}>
         {tab === 'hand' && (
           <HandTab
             db={db}
@@ -66,13 +77,13 @@ export function Game({ db, pid, snap, player, onLeave }: Props) {
       </main>
 
       <nav class="tabs">
-        <button class={tab === 'hand' ? 'active' : ''} onClick={() => setTab('hand')}>
+        <button class={tab === 'hand' ? 'active' : ''} onClick={() => switchTab('hand')}>
           Рука
         </button>
-        <button class={tab === 'city' ? 'active' : ''} onClick={() => setTab('city')}>
+        <button class={tab === 'city' ? 'active' : ''} onClick={() => switchTab('city')}>
           Мой город
         </button>
-        <button class={tab === 'others' ? 'active' : ''} onClick={() => setTab('others')}>
+        <button class={tab === 'others' ? 'active' : ''} onClick={() => switchTab('others')}>
           Соседи
         </button>
       </nav>

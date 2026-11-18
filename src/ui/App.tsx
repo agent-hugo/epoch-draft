@@ -173,18 +173,28 @@ function Room({ room, onLeave }: { room: string; onLeave: () => void }) {
     };
   }, [room, pid]);
 
+  const online = !!snap?.connected && !error;
+  const dot = <span class={`conn-dot ${online ? 'on' : 'off'}`} title={online ? 'Связь с брокером есть' : 'Нет связи с брокером'} />;
+
+  let body;
   if (error)
-    return (
+    body = (
       <main class="screen narrow">
         <p class="error">{error}</p>
         <button onClick={onLeave}>Назад</button>
       </main>
     );
-  if (!conn || !snap) return <main class="screen narrow muted">Подключение…</main>;
+  else if (!conn || !snap) body = <main class="screen narrow muted">Подключение…</main>;
+  else if (snap.lobby?.started && snap.pub)
+    body = <Game db={db} room={room} pid={pid} snap={snap} player={conn.player} onLeave={onLeave} />;
+  else body = <Lobby room={room} pid={pid} snap={snap} host={conn.host} onLeave={onLeave} refresh={() => force((x) => x + 1)} />;
 
-  const started = snap.lobby?.started && snap.pub;
-  if (started) return <Game db={db} room={room} pid={pid} snap={snap} player={conn.player} onLeave={onLeave} />;
-  return <Lobby room={room} pid={pid} snap={snap} host={conn.host} onLeave={onLeave} refresh={() => force((x) => x + 1)} />;
+  return (
+    <>
+      {dot}
+      {body}
+    </>
+  );
 }
 
 function Lobby(props: {
