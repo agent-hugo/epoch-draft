@@ -192,8 +192,11 @@ button.icon {
    header and the tab bar stay on screen whatever the tab length. */
 .game {
   position: fixed;
-  inset: 0;
-  height: 100dvh;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100vh;
+  height: var(--app-h, 100dvh);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -419,4 +422,68 @@ button.icon {
 }
 .conn-dot.off {
   background: #e74c3c;
+}
+
+/* reference tab */
+.reference details {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.reference summary {
+  font-weight: 600;
+  cursor: pointer;
+}
+.reference details[open] summary {
+  margin-bottom: 8px;
+}
+.legend {
+  border-collapse: collapse;
+  width: 100%;
+}
+.legend td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.legend .icon-cell {
+  width: 1%;
+  white-space: nowrap;
+  text-align: center;
+}
+.rules-list {
+  margin: 0;
+  padding-left: 18px;
+}
+.rules-list li {
+  margin-bottom: 6px;
+}
+.civ {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.civ.mine {
+  border-left: 4px solid var(--accent);
+  padding-left: 8px;
+}
+.stages {
+  margin: 4px 0 0;
+  padding-left: 22px;
+}
+.ref-cards {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.ref-cards li {
+  border-left: 4px solid var(--tc);
+  padding: 4px 0 4px 8px;
+  margin-bottom: 6px;
+}
+.ref-cards .title {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
 }

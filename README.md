@@ -4,6 +4,8 @@
 Великое сооружение за три эпохи. Каждый играет со своего телефона, связь между
 игроками идёт через MQTT-брокер.
 
+**Играть:** https://agent-hugo.github.io/epoch-draft/
+
 - Правила: [docs/rules.md](docs/rules.md)
 - Архитектура и протокол: [docs/architecture.md](docs/architecture.md)
 

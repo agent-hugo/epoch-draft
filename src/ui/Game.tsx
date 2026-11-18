@@ -6,9 +6,10 @@ import { military, ranking, scoreGame, scorePlayer } from '../engine/scoring';
 import type { CardDef, Choice, GameState, PlayerState, ScoreBreakdown } from '../engine/types';
 import type { ClientSnapshot, Player } from '../net/client';
 import { playerView } from '../net/protocol';
+import { Reference } from './Reference';
 import { costText, effectsText, EPOCH_NAME, resList, RES_ICON, TYPE_NAME, TYPE_ORDER } from './format';
 
-type Tab = 'hand' | 'city' | 'others';
+type Tab = 'hand' | 'city' | 'others' | 'help';
 
 interface Props {
   db: Db;
@@ -74,6 +75,7 @@ export function Game({ db, pid, snap, player, onLeave }: Props) {
         )}
         {tab === 'city' && <CityView db={db} state={view} i={i} />}
         {tab === 'others' && <Others db={db} state={view} me={i} />}
+        {tab === 'help' && <Reference db={db} highlightCiv={me.civ} />}
       </main>
 
       <nav class="tabs">
@@ -81,10 +83,13 @@ export function Game({ db, pid, snap, player, onLeave }: Props) {
           Рука
         </button>
         <button class={tab === 'city' ? 'active' : ''} onClick={() => switchTab('city')}>
-          Мой город
+          Город
         </button>
         <button class={tab === 'others' ? 'active' : ''} onClick={() => switchTab('others')}>
           Соседи
+        </button>
+        <button class={tab === 'help' ? 'active' : ''} onClick={() => switchTab('help')}>
+          Справка
         </button>
       </nav>
     </div>

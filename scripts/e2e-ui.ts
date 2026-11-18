@@ -94,7 +94,7 @@ try {
     }
   }
   console.log(`game over after ${moves} UI moves`);
-  await guest.getByRole('button', { name: 'Мой город' }).isVisible().catch(() => false);
+  await guest.getByRole('button', { name: 'Город' }).isVisible().catch(() => false);
   await shot(host, '5-final');
   const table = await host.locator('table.scores').innerText();
   console.log(table);
