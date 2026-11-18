@@ -138,7 +138,7 @@ function GameSettings({ room, player, onLeave }: { room: string; player: Player;
         </button>
       </form>
       <button onClick={onLeave}>Выйти в меню</button>
-      <p class="small muted">Игра продолжится без вас; вернуться можно по коду комнаты.</p>
+      <p class="small muted">Остальные будут ждать вашего хода, пока вы не вернётесь по коду комнаты.</p>
       <button class="danger" disabled={ending} onClick={end}>
         {ending ? 'Завершаем…' : 'Завершить игру для всех'}
       </button>
