@@ -7,9 +7,18 @@ import type { CardDef, Choice, GameState, PlayerState, ScoreBreakdown } from '..
 import type { ClientSnapshot, Player } from '../net/client';
 import { playerView } from '../net/protocol';
 import { Reference } from './Reference';
+import { settings } from './storage';
 import { costText, effectsText, EPOCH_NAME, resList, RES_ICON, TYPE_NAME, TYPE_ORDER } from './format';
 
-type Tab = 'hand' | 'city' | 'others' | 'help';
+type Tab = 'hand' | 'city' | 'others' | 'help' | 'settings';
+
+const TABS: { id: Tab; icon: string; label: string }[] = [
+  { id: 'hand', icon: '🃏', label: 'Рука' },
+  { id: 'city', icon: '🏙️', label: 'Город' },
+  { id: 'others', icon: '👥', label: 'Соседи' },
+  { id: 'help', icon: '📖', label: 'Справка' },
+  { id: 'settings', icon: '⚙️', label: 'Настройки' },
+];
 
 interface Props {
   db: Db;
@@ -20,7 +29,7 @@ interface Props {
   onLeave: () => void;
 }
 
-export function Game({ db, pid, snap, player, onLeave }: Props) {
+export function Game({ db, room, pid, snap, player, onLeave }: Props) {
   const [tab, setTab] = useState<Tab>('hand');
   // The tab body is the only scrolling element, so the header and the tab bar
   // never leave the screen. Each tab keeps its own scroll position.
@@ -76,22 +85,64 @@ export function Game({ db, pid, snap, player, onLeave }: Props) {
         {tab === 'city' && <CityView db={db} state={view} i={i} />}
         {tab === 'others' && <Others db={db} state={view} me={i} />}
         {tab === 'help' && <Reference db={db} highlightCiv={me.civ} />}
+        {tab === 'settings' && <GameSettings room={room} player={player} onLeave={onLeave} />}
       </main>
 
       <nav class="tabs">
-        <button class={tab === 'hand' ? 'active' : ''} onClick={() => switchTab('hand')}>
-          Рука
-        </button>
-        <button class={tab === 'city' ? 'active' : ''} onClick={() => switchTab('city')}>
-          Город
-        </button>
-        <button class={tab === 'others' ? 'active' : ''} onClick={() => switchTab('others')}>
-          Соседи
-        </button>
-        <button class={tab === 'help' ? 'active' : ''} onClick={() => switchTab('help')}>
-          Справка
-        </button>
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            class={tab === t.id ? 'active' : ''}
+            aria-label={t.label}
+            title={t.label}
+            onClick={() => switchTab(t.id)}
+          >
+            {t.icon}
+          </button>
+        ))}
       </nav>
+    </div>
+  );
+}
+
+function GameSettings({ room, player, onLeave }: { room: string; player: Player; onLeave: () => void }) {
+  const [name, setName] = useState(settings.name);
+  const [ending, setEnding] = useState(false);
+  const rename = () => {
+    const n = name.trim();
+    if (!n || n === settings.name) return;
+    settings.name = n;
+    player.rename(n);
+  };
+  const end = () => {
+    if (!confirm('Завершить игру для всех? Партия будет удалена, продолжить её будет нельзя.')) return;
+    setEnding(true);
+    void player.endGame().catch(() => setEnding(false));
+  };
+  return (
+    <div class="stack settings-tab">
+      <h2>Настройки</h2>
+      <div>
+        Комната: <b>{room}</b>
+      </div>
+      <form
+        class="row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          rename();
+        }}
+      >
+        <input value={name} maxLength={24} aria-label="Ваше имя" onInput={(e) => setName(e.currentTarget.value)} />
+        <button type="submit" disabled={!name.trim() || name.trim() === settings.name}>
+          Сменить имя
+        </button>
+      </form>
+      <button onClick={onLeave}>Выйти в меню</button>
+      <p class="small muted">Игра продолжится без вас; вернуться можно по коду комнаты.</p>
+      <button class="danger" disabled={ending} onClick={end}>
+        {ending ? 'Завершаем…' : 'Завершить игру для всех'}
+      </button>
+      <p class="small muted">Удаляет партию у всех участников. Нажать может любой игрок.</p>
     </div>
   );
 }

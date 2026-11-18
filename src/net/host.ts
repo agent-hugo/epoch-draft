@@ -28,6 +28,8 @@ export class Host {
   game?: GameState;
   private bots = new Map<string, Bot>();
   private errors = new Map<string, string>();
+  /** The room was closed by a participant: never publish again. */
+  private closed = false;
 
   constructor(
     private db: Db,
@@ -40,6 +42,9 @@ export class Host {
 
   /** Restores a previous session from the broker (if any) and starts listening. */
   async start(): Promise<void> {
+    this.bus.subscribe(topics.closed(this.room), (_t, payload) => {
+      if (payload) this.closed = true;
+    });
     const snapshot = await new Promise<HostSnapshot | null>((resolve) => {
       const timer = setTimeout(() => resolve(null), 1500);
       this.bus.subscribe(topics.hostState(this.room), (_t, payload) => {
@@ -66,7 +71,7 @@ export class Host {
   }
 
   private onJoin(pid: string, msg: JoinMsg | null) {
-    if (!msg || typeof msg.name !== 'string') return;
+    if (this.closed || !msg || typeof msg.name !== 'string') return;
     const name = msg.name.trim().slice(0, 24) || 'Игрок';
     const existing = this.lobby.players.find((p) => p.id === pid);
     if (existing) {
@@ -118,7 +123,7 @@ export class Host {
 
   private onAction(pid: string, msg: ActionMsg | null) {
     const g = this.game;
-    if (!msg || !g || g.phase !== 'play') return;
+    if (this.closed || !msg || !g || g.phase !== 'play') return;
     if (msg.epoch !== g.epoch || msg.turn !== g.turn) return;
     if (!g.players.some((p) => p.id === pid) || this.bots.has(pid)) return;
     const prev = g.pending[pid];
@@ -144,6 +149,7 @@ export class Host {
   }
 
   private async publishAll(): Promise<void> {
+    if (this.closed) return;
     const pubs: Promise<void>[] = [this.bus.publish(topics.lobby(this.room), this.lobby, true)];
     const g = this.game;
     if (g) {

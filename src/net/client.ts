@@ -4,6 +4,7 @@ import {
   lastLevel,
   topics,
   type ActionMsg,
+  type ClosedMsg,
   type HandMsg,
   type JoinMsg,
   type LobbyMsg,
@@ -16,6 +17,8 @@ export interface ClientSnapshot {
   hand?: HandMsg;
   presence: Record<string, boolean>;
   connected: boolean;
+  /** Someone ended the game; the room's state has been wiped. */
+  closed?: ClosedMsg;
 }
 
 /** One player's connection to a room. */
@@ -35,6 +38,11 @@ export class Player {
       this.update({ connected });
       if (connected) void this.announce();
     });
+    this.bus.subscribe(topics.closed(this.room), (_t, p) => {
+      if (!p) return;
+      this.update({ closed: p as ClosedMsg });
+      void this.clearOwn();
+    });
     this.bus.subscribe(topics.lobby(this.room), (_t, p) => this.update({ lobby: (p as LobbyMsg) ?? undefined }));
     this.bus.subscribe(topics.publicState(this.room), (_t, p) => this.update({ pub: (p as PublicState) ?? undefined }));
     this.bus.subscribe(topics.hand(this.room, this.id), (_t, p) => this.update({ hand: (p as HandMsg) ?? undefined }));
@@ -48,6 +56,7 @@ export class Player {
   }
 
   private async announce() {
+    if (this.snapshot.closed) return;
     await this.bus.publish(topics.presence(this.room, this.id), 'online', true);
     await this.bus.publish(topics.join(this.room, this.id), { name: this.name } satisfies JoinMsg, true);
   }
@@ -62,6 +71,26 @@ export class Player {
     if (!pub) return;
     const msg: ActionMsg = { epoch: pub.epoch, turn: pub.turn, choice };
     void this.bus.publish(topics.action(this.room, this.id), msg, true);
+  }
+
+  /**
+   * Ends the game for everyone: marks the room closed (the host stops on
+   * that) and removes every retained message of the room.
+   */
+  async endGame(): Promise<void> {
+    const ids = new Set([this.id, ...(this.snapshot.lobby?.players.map((p) => p.id) ?? [])]);
+    const r = this.room;
+    await this.bus.publish(topics.closed(r), { by: this.name } satisfies ClosedMsg, true);
+    const clear = [topics.lobby(r), topics.publicState(r), topics.hostState(r)];
+    for (const id of ids) clear.push(topics.join(r, id), topics.action(r, id), topics.hand(r, id), topics.presence(r, id));
+    await Promise.all(clear.map((t) => this.bus.publish(t, null, true)));
+  }
+
+  /** Removes this player's own retained messages from a closed room. */
+  private async clearOwn(): Promise<void> {
+    const r = this.room;
+    const own = [topics.join(r, this.id), topics.action(r, this.id), topics.hand(r, this.id), topics.presence(r, this.id)];
+    await Promise.all(own.map((t) => this.bus.publish(t, null, true)));
   }
 
   subscribe(fn: (s: ClientSnapshot) => void): () => void {

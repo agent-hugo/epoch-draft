@@ -15,6 +15,8 @@ export const topics = {
   presenceAll: (room: string) => `${TOPIC_ROOT}/${room}/presence/+`,
   /** Full host state, so the host can resume after a reload. */
   hostState: (room: string) => `${TOPIC_ROOT}/${room}/host`,
+  /** Set (retained) when a participant ends the game for everyone. */
+  closed: (room: string) => `${TOPIC_ROOT}/${room}/closed`,
 };
 
 /** Last topic level, e.g. the player id of `.../action/<pid>`. */
@@ -36,6 +38,11 @@ export interface LobbyMsg {
 
 export interface JoinMsg {
   name: string;
+}
+
+export interface ClosedMsg {
+  /** Name of the player who ended the game. */
+  by: string;
 }
 
 export interface ActionMsg {

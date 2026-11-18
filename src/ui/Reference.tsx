@@ -1,3 +1,4 @@
+import type { ComponentChildren } from 'preact';
 import type { Db } from '../engine/db';
 import type { CardDef, CardType, Epoch } from '../engine/types';
 import { GOODS, RAW } from '../engine/types';
@@ -13,6 +14,25 @@ const TYPE_HINT: Record<CardType, string> = {
   dynasty: 'только в эпохе III: очки за то, что построено у вас и соседей',
 };
 
+// Which sections are open. Kept outside the component so it survives tab
+// switches and reopening the help screen; everything starts collapsed.
+const openSections = new Set<string>();
+
+function Section({ id, title, children }: { id: string; title: string; children: ComponentChildren }) {
+  return (
+    <details
+      open={openSections.has(id)}
+      onToggle={(e) => {
+        if (e.currentTarget.open) openSections.add(id);
+        else openSections.delete(id);
+      }}
+    >
+      <summary>{title}</summary>
+      {children}
+    </details>
+  );
+}
+
 /** The legend: icons, card types, civilizations and every card in the deck. */
 export function Reference({ db, highlightCiv }: { db: Db; highlightCiv?: string }) {
   const civs = [...db.civs.values()];
@@ -23,8 +43,7 @@ export function Reference({ db, highlightCiv }: { db: Db; highlightCiv?: string 
 
   return (
     <div class="reference">
-      <details open>
-        <summary>Значки</summary>
+      <Section id="icons" title="Значки">
         <table class="legend">
           <tbody>
             {RAW.map((r) => (
@@ -47,17 +66,16 @@ export function Reference({ db, highlightCiv }: { db: Db; highlightCiv?: string 
             <Row icon="даром потом" text="эта карта позволит бесплатно построить указанные карты следующих эпох" />
           </tbody>
         </table>
-      </details>
+      </Section>
 
-      <details>
-        <summary>Как считаются очки</summary>
+      <Section id="scoring" title="Как считаются очки">
         <ul class="rules-list">
           <li>
             <b>Армия.</b> В конце каждой эпохи сравниваете ⚔️ с каждым соседом: победа даёт +1/+3/+5⭐ (эпохи I/II/III),
             поражение −1⭐, ничья — ничего.
           </li>
           <li>
-            <b>Наука.</b> За каждую школу: 1 символ — 1⭐, 2 — 3⭐, 3 — 6⭐, 4 — 10⭐ и т. д.,, плюс 7⭐ за каждый полный набор из трёх
+            <b>Наука.</b> За каждую школу: 1 символ — 1⭐, 2 — 3⭐, 3 — 6⭐, 4 — 10⭐ и т. д., плюс 7⭐ за каждый полный набор из трёх
             разных школ.
           </li>
           <li>
@@ -69,19 +87,17 @@ export function Reference({ db, highlightCiv }: { db: Db; highlightCiv?: string 
             руки передаются соседу (эпохи I и III — влево, II — вправо).
           </li>
         </ul>
-      </details>
+      </Section>
 
-      <details>
-        <summary>Типы карт</summary>
+      <Section id="types" title="Типы карт">
         {TYPE_ORDER.map((t) => (
           <div key={t} class={`mini t-${t}`}>
             <span class="chip">{TYPE_NAME[t]}</span> — {TYPE_HINT[t]}
           </div>
         ))}
-      </details>
+      </Section>
 
-      <details>
-        <summary>Цивилизации и сооружения</summary>
+      <Section id="civs" title="Цивилизации и сооружения">
         {civs.map((c) => (
           <div key={c.id} class={c.id === highlightCiv ? 'civ mine' : 'civ'}>
             <div>
@@ -97,19 +113,17 @@ export function Reference({ db, highlightCiv }: { db: Db; highlightCiv?: string 
             </ol>
           </div>
         ))}
-      </details>
+      </Section>
 
       {([1, 2, 3] as Epoch[]).map((e) => (
-        <details key={e}>
-          <summary>Карты эпохи {EPOCH_NAME[e]}</summary>
+        <Section key={e} id={`epoch${e}`} title={`Карты эпохи ${EPOCH_NAME[e]}`}>
           <CardList db={db} cards={byEpoch(e, false)} />
-        </details>
+        </Section>
       ))}
-      <details>
-        <summary>Династии (эпоха III)</summary>
+      <Section id="dynasty" title="Династии (эпоха III)">
         <p class="small muted">В колоду эпохи III случайно попадает на 2 династии больше, чем игроков.</p>
         <CardList db={db} cards={byEpoch(3, true)} />
-      </details>
+      </Section>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { Host } from '../net/host';
 import { Bus } from '../net/mqtt';
 import { normalizeRoom, randomRoomCode, topics } from '../net/protocol';
 import { Game } from './Game';
+import { Reference } from './Reference';
 import { settings } from './storage';
 
 export const db = new Db(gameData);
@@ -42,12 +43,48 @@ export function App() {
     location.hash = code ? `room=${code}` : '';
   };
 
-  if (showSettings) return <Settings onDone={() => setShowSettings(false)} />;
-  if (!room) return <Home onEnter={go} onSettings={() => setShowSettings(true)} />;
-  return <Room key={room} room={room} onLeave={() => go('')} />;
+  // Help is an overlay, so opening it does not unmount the room (and drop
+  // the broker connection) underneath.
+  const [help, setHelp] = useState(false);
+  const onHelp = () => setHelp(true);
+
+  let screen;
+  if (showSettings) screen = <Settings onDone={() => setShowSettings(false)} onHelp={onHelp} />;
+  else if (!room) screen = <Home onEnter={go} onSettings={() => setShowSettings(true)} onHelp={onHelp} />;
+  else screen = <Room key={room} room={room} onLeave={() => go('')} onHelp={onHelp} />;
+  return (
+    <>
+      {screen}
+      {help && <HelpOverlay onClose={() => setHelp(false)} />}
+    </>
+  );
 }
 
-function Settings({ onDone }: { onDone: () => void }) {
+function HelpOverlay({ onClose }: { onClose: () => void }) {
+  return (
+    <div class="game overlay">
+      <header class="bar">
+        <b>Справка</b>
+        <button class="close" onClick={onClose}>
+          Закрыть
+        </button>
+      </header>
+      <main class="tab-body">
+        <Reference db={db} />
+      </main>
+    </div>
+  );
+}
+
+function HelpButton({ onHelp }: { onHelp: () => void }) {
+  return (
+    <button class="link" onClick={onHelp}>
+      📖 Справка по игре
+    </button>
+  );
+}
+
+function Settings({ onDone, onHelp }: { onDone: () => void; onHelp: () => void }) {
   const [name, setName] = useState(settings.name);
   const [token, setToken] = useState(settings.token);
   const [url, setUrl] = useState(settings.brokerUrl);
@@ -86,11 +123,13 @@ function Settings({ onDone }: { onDone: () => void }) {
       >
         Сохранить
       </button>
+      <HelpButton onHelp={onHelp} />
     </main>
   );
 }
 
-function Home({ onEnter, onSettings }: { onEnter: (room: string) => void; onSettings: () => void }) {
+function Home(props: { onEnter: (room: string) => void; onSettings: () => void; onHelp: () => void }) {
+  const { onEnter, onSettings } = props;
   const [code, setCode] = useState('');
   return (
     <main class="screen narrow">
@@ -128,6 +167,7 @@ function Home({ onEnter, onSettings }: { onEnter: (room: string) => void; onSett
       <button class="link" onClick={onSettings}>
         Настройки
       </button>
+      <HelpButton onHelp={props.onHelp} />
     </main>
   );
 }
@@ -139,7 +179,7 @@ interface Conn {
   error?: string;
 }
 
-function Room({ room, onLeave }: { room: string; onLeave: () => void }) {
+function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; onHelp: () => void }) {
   const pid = settings.playerId;
   const [conn, setConn] = useState<Conn>();
   const [snap, setSnap] = useState<ClientSnapshot>();
@@ -169,9 +209,16 @@ function Room({ room, onLeave }: { room: string; onLeave: () => void }) {
     return () => {
       alive = false;
       unsub();
-      void bus.publish(topics.presence(room, pid), 'offline', true).finally(() => bus.end());
+      // In a closed room the player has already removed its retained messages.
+      const bye = player.snapshot.closed ? Promise.resolve() : bus.publish(topics.presence(room, pid), 'offline', true);
+      void bye.finally(() => bus.end());
     };
   }, [room, pid]);
+
+  const closed = snap?.closed;
+  useEffect(() => {
+    if (closed) settings.clearHost(room);
+  }, [closed, room]);
 
   const online = !!snap?.connected && !error;
   const dot = <span class={`conn-dot ${online ? 'on' : 'off'}`} title={online ? 'Связь с брокером есть' : 'Нет связи с брокером'} />;
@@ -184,10 +231,33 @@ function Room({ room, onLeave }: { room: string; onLeave: () => void }) {
         <button onClick={onLeave}>Назад</button>
       </main>
     );
+  else if (closed)
+    body = (
+      <main class="screen narrow">
+        <h1>Игра завершена</h1>
+        <p class="muted">
+          {closed.by ? `${closed.by} завершил(а) игру` : 'Игру завершили'} в комнате {room}. Всё её состояние удалено.
+        </p>
+        <button class="primary" onClick={onLeave}>
+          В меню
+        </button>
+      </main>
+    );
   else if (!conn || !snap) body = <main class="screen narrow muted">Подключение…</main>;
   else if (snap.lobby?.started && snap.pub)
     body = <Game db={db} room={room} pid={pid} snap={snap} player={conn.player} onLeave={onLeave} />;
-  else body = <Lobby room={room} pid={pid} snap={snap} host={conn.host} onLeave={onLeave} refresh={() => force((x) => x + 1)} />;
+  else
+    body = (
+      <Lobby
+        room={room}
+        pid={pid}
+        snap={snap}
+        host={conn.host}
+        onLeave={onLeave}
+        onHelp={onHelp}
+        refresh={() => force((x) => x + 1)}
+      />
+    );
 
   return (
     <>
@@ -203,6 +273,7 @@ function Lobby(props: {
   snap: ClientSnapshot;
   host?: Host;
   onLeave: () => void;
+  onHelp: () => void;
   refresh: () => void;
 }) {
   const { room, pid, snap, host } = props;
@@ -220,6 +291,7 @@ function Lobby(props: {
         <p class="muted">Ждём хоста комнаты {room}…</p>
         <p class="muted small">Если комнаты не существует, проверьте код.</p>
         <button onClick={props.onLeave}>Назад</button>
+        <HelpButton onHelp={props.onHelp} />
       </main>
     );
 
@@ -304,6 +376,7 @@ function Lobby(props: {
       <button class="link" onClick={props.onLeave}>
         Выйти
       </button>
+      <HelpButton onHelp={props.onHelp} />
     </main>
   );
 }

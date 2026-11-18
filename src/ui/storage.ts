@@ -65,4 +65,7 @@ export const settings = {
   setHost(room: string): void {
     save(`ed:host:${room}`, '1');
   },
+  clearHost(room: string): void {
+    save(`ed:host:${room}`, null);
+  },
 };
