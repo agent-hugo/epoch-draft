@@ -299,6 +299,12 @@ button.icon {
 }
 .card.chosen {
   outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* A card that can be built this turn (with coins for trade, if needed). */
+.card.can {
+  border: 2px solid var(--ok);
+  border-left: 6px solid var(--tc);
 }
 .card-head {
   width: 100%;

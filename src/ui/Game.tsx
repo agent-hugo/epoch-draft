@@ -471,7 +471,7 @@ function HandTab(props: {
           const card = db.card(o.card);
           const isChosen = chosen?.card === o.card;
           return (
-            <li key={o.card} class={`card t-${card.type} ${isChosen ? 'chosen' : ''}`}>
+            <li key={o.card} class={`card t-${card.type} ${isChosen ? 'chosen' : ''} ${o.build.length ? 'can' : ''}`}>
               <button class="card-head" onClick={() => setOpen(open === o.card ? undefined : o.card)}>
                 <CardFace db={db} card={card} chain={o.chain} affordable={o.build.length > 0} />
               </button>
