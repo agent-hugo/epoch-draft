@@ -36,12 +36,17 @@ function consumeTokenFromHash(): void {
 export function App() {
   consumeTokenFromHash();
   const [room, setRoom] = useState(() => normalizeRoom(readHash().get('room') ?? ''));
-  const [showSettings, setShowSettings] = useState(() => !settings.token || !settings.name);
+  // Settings are forced until a name and a token are set; otherwise they are
+  // opened from the home screen as their own history entry (#settings), so
+  // that the back button leaves them instead of returning to an earlier page.
+  const [setup, setSetup] = useState(() => !settings.token || !settings.name);
+  const [inSettings, setInSettings] = useState(() => readHash().has('settings'));
 
   useEffect(() => {
     const onHash = () => {
       consumeTokenFromHash();
       setRoom(normalizeRoom(readHash().get('room') ?? ''));
+      setInSettings(readHash().has('settings'));
     };
     addEventListener('hashchange', onHash);
     return () => removeEventListener('hashchange', onHash);
@@ -57,9 +62,26 @@ export function App() {
   const [help, setHelp] = useState<{ world?: string }>();
   const onHelp = (world?: string) => setHelp({ world });
 
+  const openSettings = () => {
+    history.pushState({ settings: true }, '', '#settings');
+    setInSettings(true);
+  };
+  const closeSettings = () => {
+    setSetup(false);
+    if (!readHash().has('settings')) return;
+    // Opened from the home screen: step back to it. Opened by a link or a
+    // reload: there is nothing of ours behind, so replace the entry instead.
+    if (history.state?.settings) history.back();
+    else {
+      history.replaceState(null, '', `${location.pathname}${location.search}`);
+      setInSettings(false);
+    }
+  };
+
   let screen;
-  if (showSettings) screen = <Settings onDone={() => setShowSettings(false)} onHelp={onHelp} />;
-  else if (!room) screen = <Home onEnter={go} onSettings={() => setShowSettings(true)} onHelp={onHelp} />;
+  if (setup || inSettings)
+    screen = <Settings onDone={closeSettings} onBack={setup ? undefined : closeSettings} onHelp={onHelp} />;
+  else if (!room) screen = <Home onEnter={go} onSettings={openSettings} onHelp={onHelp} />;
   else screen = <Room key={room} room={room} onLeave={() => go('')} onHelp={onHelp} />;
   return (
     <>
@@ -120,7 +142,8 @@ function HelpButton({ onHelp }: { onHelp: (world?: string) => void }) {
   );
 }
 
-function Settings({ onDone, onHelp }: { onDone: () => void; onHelp: (world?: string) => void }) {
+function Settings(props: { onDone: () => void; onBack?: () => void; onHelp: (world?: string) => void }) {
+  const { onDone, onBack, onHelp } = props;
   const [name, setName] = useState(settings.name);
   const [token, setToken] = useState(settings.token);
   const [url, setUrl] = useState(settings.brokerUrl);
@@ -159,6 +182,11 @@ function Settings({ onDone, onHelp }: { onDone: () => void; onHelp: (world?: str
       >
         Сохранить
       </button>
+      {onBack && (
+        <button class="link" onClick={onBack}>
+          ← Назад без сохранения
+        </button>
+      )}
       <HelpButton onHelp={onHelp} />
     </main>
   );
