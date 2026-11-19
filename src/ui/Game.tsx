@@ -668,7 +668,7 @@ function CityView({ db, state, i }: { db: Db; state: GameState; i: number }) {
         <div class="stage-list">
           {civ.monument.stages.map((s, k) => (
             <span key={k} class={k < p.stages ? 'stage done' : 'stage'}>
-              {k + 1}: {effectsText(db, s.effects)}
+              {k + 1}: {costText(db, s.cost)} → {effectsText(db, s.effects)}
             </span>
           ))}
         </div>
