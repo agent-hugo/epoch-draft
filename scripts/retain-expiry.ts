@@ -13,7 +13,7 @@
  *   MQTT_URL=wss://... MQTT_TOKEN=... npm run retain-expiry -- [options]
  *
  *   --apply       actually re-publish; without it only lists what would change
- *   --days N      expiry in days, default 90 (the one the app uses)
+ *   --days N      expiry in days, default 7 (the one the app uses)
  *   --all         also re-publish messages that already have an expiry
  */
 import mqtt from 'mqtt';

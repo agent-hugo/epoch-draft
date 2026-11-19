@@ -26,13 +26,13 @@ MQTT_URL=wss://... MQTT_TOKEN=... npm run net-smoke   # партия через 
 MQTT_TOKEN=... npm run e2e                           # партия через интерфейс (Playwright + Chrome)
 ```
 
-Все retained-сообщения публикуются с message expiry interval 90 дней, так что
+Все retained-сообщения публикуются с message expiry interval 7 дней, так что
 брошенные комнаты исчезают с брокера сами. Старые retained-сообщения проекта
 (дерево `epoch-draft/#`) без срока можно перепубликовать со сроком; без
 `--apply` скрипт только показывает список:
 
 ```sh
-MQTT_URL=wss://... MQTT_TOKEN=... npm run retain-expiry -- [--apply] [--days 90] [--all]
+MQTT_URL=wss://... MQTT_TOKEN=... npm run retain-expiry -- [--apply] [--days 7] [--all]
 ```
 
 Чтобы играть, нужны адрес MQTT-брокера с WebSocket (TLS) и токен; их вводят в

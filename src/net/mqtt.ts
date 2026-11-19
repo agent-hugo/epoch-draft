@@ -6,8 +6,8 @@ export interface BrokerConfig {
   token: string;
 }
 
-/** Retained messages expire after 90 days, so abandoned rooms disappear from the broker. */
-export const RETAIN_EXPIRY_S = 90 * 24 * 60 * 60;
+/** Retained messages expire after 7 days, so abandoned rooms disappear from the broker. */
+export const RETAIN_EXPIRY_S = 7 * 24 * 60 * 60;
 
 /** What the broker says about a message besides its payload. */
 export interface MessageMeta {
