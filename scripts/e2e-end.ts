@@ -66,6 +66,21 @@ async function sellFirst(page: Page, screenshot?: string) {
   await confirm(page, 'Подтвердить');
 }
 
+/** Names in a player list, top to bottom. */
+const seatNames = async (p: Page, list: string) =>
+  (await p.locator(`${list} .players .seat-name`).allInnerTexts()).map((t) => t.trim());
+
+/** In the drag mode of a player list, drags the row with `name` to the top. */
+async function dragToTop(page: Page, name: string) {
+  const rows = page.locator('.seats-edit li');
+  const from = (await rows.filter({ hasText: name }).boundingBox())!;
+  const top = (await rows.first().boundingBox())!;
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(top.x + top.width / 2, top.y + 2, { steps: 12 });
+  await page.mouse.up();
+}
+
 const openSections = (p: Page) => p.locator('.reference details[open]').count();
 
 try {
@@ -124,6 +139,17 @@ try {
   await host.getByRole('heading', { name: 'Мир' }).scrollIntoViewIfNeeded();
   await shot(host, 'e0-lobby');
 
+  // The host reorders the seats: the list is the seating, the one above sits on the left.
+  check((await seatNames(guest, '.screen')).join() === 'Мама,Петя,Вася', `lobby order: ${await seatNames(guest, '.screen')}`);
+  check(!(await guest.getByRole('button', { name: /Изменить порядок/ }).isVisible()), 'only the host reorders');
+  await host.getByRole('button', { name: /Изменить порядок/ }).click();
+  await dragToTop(host, 'Вася');
+  check((await seatNames(guest, '.screen')).join() === 'Мама,Петя,Вася', 'the order must apply only when done');
+  await shot(host, 'e0-reorder');
+  await host.getByRole('button', { name: 'Готово' }).click();
+  await guest.waitForFunction(() => document.querySelector('.players li')?.textContent?.includes('Вася'));
+  check((await seatNames(guest, '.screen')).join() === 'Вася,Мама,Петя', `reordered: ${await seatNames(guest, '.screen')}`);
+
   // Civilizations picked by the players.
   await host.getByRole('radio', { name: /Выбор игроков/ }).click();
   await host.getByRole('button', { name: /^Египет/ }).click();
@@ -138,8 +164,8 @@ try {
   await host.getByRole('button', { name: 'Начать игру' }).click();
   for (const p of [host, guest, third]) await p.locator('.cards .card').first().waitFor({ timeout: 15000 });
 
-  // The hand tab tells where the hand goes (epoch I passes to the left).
-  const pass = (await host.locator('.pass').textContent()) ?? '';
+  // The header shows the neighbours and where the hand goes (epoch I passes to the left).
+  const pass = (await host.locator('.neighbours').innerText()).replace(/\s+/g, ' ');
   check(await host.getByText('Великая пирамида').isVisible(), 'host must play Egypt');
   check(await guest.getByText('Колизей').isVisible(), 'guest must play Rome');
 
@@ -149,7 +175,9 @@ try {
   await host.getByRole('button', { name: 'Рука' }).click();
   check(await host.getByRole('button', { name: 'Продать за 3🪙' }).isVisible(), 'card must stay expanded');
   await host.locator('.cards .card-head').first().click();
-  check(/рука перейдёт влево ◀ (Петя|Вася)$/.test(pass), `pass hint: ${pass}`);
+  check(pass === '◀ Вася ◀ далее Петя ▶', `neighbours: ${pass}`);
+  check((await host.locator('.neighbours .next').innerText()).includes('Вася'), 'the hand goes to the left one');
+  check(!(await host.getByText(/рука перейдёт/).count()), 'the old pass line must be gone');
 
   // The host hands Вася's seat to a bot; Вася is dropped, the game goes on.
   await host.getByRole('button', { name: 'Настройки' }).click();
@@ -161,7 +189,18 @@ try {
   await confirm(host, 'Заменить');
   await third.getByRole('heading', { name: 'Вас заменили ботом' }).waitFor({ timeout: 10000 });
   await shot(third, 'e0-replaced');
-  check((await host.locator('.settings-tab .players li').count()) === 1, 'replaced player must leave the list');
+  // Every player stays in the list, bots too; only humans can be replaced.
+  check((await seatNames(host, '.settings-tab')).join() === '🤖 Вася,Мама,Петя', `settings list: ${await seatNames(host, '.settings-tab')}`);
+  check((await host.locator('.settings-tab .players li').getByRole('button', { name: /Заменить/ }).count()) === 1, 'only Петя can be replaced');
+  // Reordering during the game changes the neighbours.
+  await host.getByRole('button', { name: /Изменить порядок/ }).click();
+  await dragToTop(host, 'Мама');
+  await host.getByRole('button', { name: 'Готово' }).click();
+  await host.locator('.neighbours', { hasText: '◀ Петя' }).waitFor();
+  const swapped = (await host.locator('.neighbours').innerText()).replace(/\s+/g, ' ');
+  check(swapped === '◀ Петя ◀ далее 🤖 Вася ▶', `neighbours after reorder: ${swapped}`);
+  await guest.locator('.neighbours', { hasText: '◀ 🤖 Вася' }).waitFor();
+  await shot(host, 'e0-reordered');
   await host.getByRole('button', { name: 'Рука' }).click();
   // Cancelling the move confirmation keeps the hand unchosen.
   await guest.locator('.cards .card-head').first().click();

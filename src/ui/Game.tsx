@@ -4,12 +4,13 @@ import { TURNS_PER_EPOCH, type Db } from '../engine/db';
 import { coinsNeeded, leftOf, production, rightOf, type PaymentOption } from '../engine/payment';
 import { DEFEAT_POINTS, handOptions, nextStageCost, SELL_COINS, VICTORY_POINTS, type CardOptions } from '../engine/rules';
 import { military, ranking, scoreGame, scorePlayer } from '../engine/scoring';
-import type { CardDef, Choice, Cost, GameState, LogEntry, PlayerState, ScoreBreakdown } from '../engine/types';
+import type { CardDef, Choice, Cost, Epoch, GameState, LogEntry, PlayerState, ScoreBreakdown } from '../engine/types';
 import type { ClientSnapshot, Player } from '../net/client';
 import type { Host } from '../net/host';
 import { playerView } from '../net/protocol';
 import { ConfirmDialog, type Ask } from './dialog';
 import { Reference } from './Reference';
+import { SeatList } from './SeatList';
 import { settings } from './storage';
 import { costText, effectsText, EPOCH_NAME, joined, resChoice, resList, TYPE_NAME, TYPE_ORDER } from './format';
 
@@ -84,15 +85,18 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
 
   return (
     <div class="game">
-      <header class="bar">
-        <div>
-          <b>Эпоха {EPOCH_NAME[pub.epoch]}</b> · ход {pub.turn}/6
+      <header class="bar game-bar">
+        <div class="bar-row">
+          <div>
+            <b>Эпоха {EPOCH_NAME[pub.epoch]}</b> · ход {pub.turn}/6
+          </div>
+          <div class="stats">
+            <span>{me.coins}🪙</span>
+            <span>{military(db, view, i)}⚔️</span>
+            <span>{scorePlayer(db, view, i).total}⭐</span>
+          </div>
         </div>
-        <div class="stats">
-          <span>{me.coins}🪙</span>
-          <span>{military(db, view, i)}⚔️</span>
-          <span>{scorePlayer(db, view, i).total}⭐</span>
-        </div>
+        <Neighbours state={view} i={i} />
       </header>
       {!snap.connected && <div class="banner warn">Нет связи с брокером, переподключаемся…</div>}
       {snap.connected && !hostOnline && <div class="banner warn">Хост не в сети: игра продолжится, когда он вернётся.</div>}
@@ -228,17 +232,27 @@ function ActionText(props: { db: Db; state: GameState; e: LogEntry; pid: string;
   );
 }
 
-/** Conflict results between every pair of neighbours (the state right after the epoch ended). */
-function ConflictResults({ db, state, epoch }: { db: Db; state: GameState; epoch: 1 | 2 | 3 }) {
+/**
+ * Conflict results of an epoch between every pair of neighbours, as recorded
+ * by the host. Games saved before the record existed get them recomputed
+ * from the state right after the epoch ended.
+ */
+function ConflictResults({ db, state, epoch }: { db: Db; state: GameState; epoch: Epoch }) {
   const n = state.players.length;
-  const pairs = state.players.map((_, a) => [a, rightOf(n, a)] as const);
+  const name = (id: string) => state.players.find((p) => p.id === id)?.name ?? '?';
+  let battles = (state.battles ?? []).filter((b) => b.epoch === epoch);
+  if (!battles.length && !state.battles)
+    battles = state.players.map((p, a) => {
+      const b = rightOf(n, a);
+      return { epoch, players: [p.id, state.players[b]!.id], military: [military(db, state, a), military(db, state, b)] };
+    });
+  if (!battles.length) return null;
   return (
-    <ul class="summary-list">
-      {pairs.map(([a, b]) => {
-        const pa = military(db, state, a);
-        const pb = military(db, state, b);
-        const A = state.players[a]!.name;
-        const B = state.players[b]!.name;
+    <ul class="summary-list conflicts">
+      {battles.map((bt) => {
+        const [pa, pb] = bt.military;
+        const A = name(bt.players[0]);
+        const B = name(bt.players[1]);
         const res =
           pa === pb
             ? 'ничья'
@@ -246,7 +260,7 @@ function ConflictResults({ db, state, epoch }: { db: Db; state: GameState; epoch
               ? `${A} +${VICTORY_POINTS[epoch]}⭐, ${B} −${-DEFEAT_POINTS}⭐`
               : `${B} +${VICTORY_POINTS[epoch]}⭐, ${A} −${-DEFEAT_POINTS}⭐`;
         return (
-          <li key={a}>
+          <li key={bt.players.join()}>
             {A} {pa}⚔️ : {pb}⚔️ {B} → {res}
           </li>
         );
@@ -311,7 +325,8 @@ function GameSettings(props: {
   const [ending, setEnding] = useState(false);
   const [ask, setAsk] = useState<Ask>();
   const newName = name.trim();
-  const humans = (snap.lobby?.players ?? []).filter((p) => !p.bot && p.id !== snap.lobby?.host);
+  const lobby = snap.lobby;
+  const isBot = (id: string) => !!lobby?.players.find((p) => p.id === id)?.bot;
   return (
     <div class="stack settings-tab">
       <h2>Настройки</h2>
@@ -351,31 +366,39 @@ function GameSettings(props: {
       </button>
       <p class="small muted">Остальные будут ждать вашего хода, пока вы не вернётесь по коду комнаты.</p>
 
-      {host && humans.length > 0 && (
+      {host && snap.pub && (
         <>
-          <h3>Заменить игрока ботом</h3>
-          <ul class="players">
-            {humans.map((p) => (
-              <li key={p.id}>
-                <span class={`dot ${snap.presence[p.id] ? 'on' : ''}`} />
-                {p.name}
-                <button
-                  class="replace"
-                  onClick={() =>
-                    setAsk({
-                      text: `Заменить игрока ${p.name} ботом до конца игры? Его отключат от партии, вернуться он не сможет.`,
-                      ok: 'Заменить',
-                      danger: true,
-                      run: () => host.replaceWithBot(p.id),
-                    })
-                  }
-                >
-                  🤖 Заменить
-                </button>
-              </li>
-            ))}
-          </ul>
-          <p class="small muted">Пригодится, если кто-то ушёл и игра его ждёт.</p>
+          <h3>Игроки</h3>
+          <SeatList
+            players={snap.pub.players}
+            onApply={(ids) => host.reorder(ids)}
+            row={(p) => (
+              <>
+                <span class={`dot ${isBot(p.id) || snap.presence[p.id] ? 'on' : ''}`} />
+                <span class="seat-name">{p.name}</span>
+                {p.id === lobby?.host && <span class="tag">хост</span>}
+                {p.id !== lobby?.host && !isBot(p.id) && (
+                  <button
+                    class="replace"
+                    onClick={() =>
+                      setAsk({
+                        text: `Заменить игрока ${p.name} ботом до конца игры? Его отключат от партии, вернуться он не сможет.`,
+                        ok: 'Заменить',
+                        danger: true,
+                        run: () => host.replaceWithBot(p.id),
+                      })
+                    }
+                  >
+                    🤖 Заменить
+                  </button>
+                )}
+              </>
+            )}
+          />
+          <p class="small muted">
+            Заменить ботом пригодится, если кто-то ушёл и игра его ждёт. Если поменять порядок посреди хода, ходы с
+            покупками у соседей придётся сделать заново.
+          </p>
         </>
       )}
 
@@ -405,12 +428,25 @@ function GameSettings(props: {
   );
 }
 
-/** Where this hand goes after the turn: epochs I and III pass left, II right. */
-function passText(view: GameState, i: number): string {
-  if (view.turn >= TURNS_PER_EPOCH) return 'Последний ход эпохи: оставшаяся карта уйдёт в сброс.';
-  const n = view.players.length;
-  if (view.epoch === 2) return `После хода рука перейдёт вправо ▶ ${view.players[rightOf(n, i)]!.name}`;
-  return `После хода рука перейдёт влево ◀ ${view.players[leftOf(n, i)]!.name}`;
+/**
+ * The neighbours of player `i` and where the hand goes after this turn:
+ * epochs I and III pass left, II right; the last turn's card is discarded.
+ */
+function Neighbours({ state, i }: { state: GameState; i: number }) {
+  const n = state.players.length;
+  const last = state.turn >= TURNS_PER_EPOCH;
+  const toRight = state.epoch === 2;
+  return (
+    <div class="neighbours small">
+      <span class={`nb left ${!last && !toRight ? 'next' : ''}`} title="Сосед слева">
+        ◀ {state.players[leftOf(n, i)]!.name}
+      </span>
+      <span class="pass-to">{last ? 'последний ход' : toRight ? 'далее ▶' : '◀ далее'}</span>
+      <span class={`nb right ${!last && toRight ? 'next' : ''}`} title="Сосед справа">
+        {state.players[rightOf(n, i)]!.name} ▶
+      </span>
+    </div>
+  );
 }
 
 function HandTab(props: {
@@ -458,7 +494,6 @@ function HandTab(props: {
       {pendingSend && !props.error && <div class="banner">Отправляем…</div>}
       {props.error && <div class="banner warn">Ход не принят: {props.error}</div>}
 
-      <div class="pass small muted">{passText(view, i)}</div>
       <div class="monument small">
         <b>{civ.monument.name}</b>: стадия {me.stages}/3
         {stageCost && (
@@ -777,6 +812,12 @@ function GameLog({ db, state, pid }: { db: Db; state: GameState; pid: string }) 
               </li>
             ))}
           </ul>
+          {t[0]!.turn === TURNS_PER_EPOCH && !!state.battles?.length && (
+            <>
+              <h3>Конфликты эпохи {EPOCH_NAME[t[0]!.epoch]}</h3>
+              <ConflictResults db={db} state={state} epoch={t[0]!.epoch} />
+            </>
+          )}
         </div>
       ))}
     </section>

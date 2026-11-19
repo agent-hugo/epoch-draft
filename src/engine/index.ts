@@ -13,6 +13,7 @@ export {
   waitingFor,
   allChosen,
   endTurn,
+  reseat,
   playerIndex,
   isChainFree,
   RuleError,

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import type { Db } from '../engine/db';
+import { MAX_PLAYERS, MIN_PLAYERS, type Db } from '../engine/db';
 import { Player, replacedByBot, type ClientSnapshot } from '../net/client';
 import { Host } from '../net/host';
 import { Bus } from '../net/mqtt';
@@ -10,6 +10,7 @@ import { Game } from './Game';
 import { Reference } from './Reference';
 import { decodeInvite, inviteHash } from './invite';
 import { RoomList } from './Rooms';
+import { SeatList } from './SeatList';
 import { settings } from './storage';
 
 function readHash(): URLSearchParams {
@@ -374,13 +375,21 @@ function Lobby(props: {
       </div>
 
       <h2>
-        Игроки <span class="muted">{lobby.players.length}/5</span>
+        Игроки <span class="muted">{lobby.players.length}/{MAX_PLAYERS}</span>
       </h2>
-      <ul class="players">
-        {lobby.players.map((p) => (
-          <li key={p.id}>
+      <SeatList
+        players={lobby.players}
+        onApply={
+          host &&
+          ((ids) => {
+            host.reorder(ids);
+            props.refresh();
+          })
+        }
+        row={(p) => (
+          <>
             <span class={`dot ${p.bot || snap.presence[p.id] ? 'on' : ''}`} />
-            {p.name}
+            <span class="seat-name">{p.name}</span>
             {manual && <span class="muted small">{p.civ ? db.civ(p.civ).name : p.bot ? 'случайно' : 'выбирает…'}</span>}
             {p.id === lobby.host && <span class="tag">хост</span>}
             {p.id === pid && <span class="tag">вы</span>}
@@ -396,10 +405,10 @@ function Lobby(props: {
                 ×
               </button>
             )}
-          </li>
-        ))}
-      </ul>
-      {!inLobby && lobby.players.length >= 5 && <p class="error">Комната заполнена.</p>}
+          </>
+        )}
+      />
+      {!inLobby && lobby.players.length >= MAX_PLAYERS && <p class="error">Комната заполнена.</p>}
 
       <h2>Мир</h2>
       {host && worlds.length > 1 ? (
@@ -446,7 +455,7 @@ function Lobby(props: {
       {host ? (
         <div class="stack">
           <button
-            disabled={lobby.players.length >= 5}
+            disabled={lobby.players.length >= MAX_PLAYERS}
             onClick={() => {
               host.addBot();
               props.refresh();
@@ -464,7 +473,11 @@ function Lobby(props: {
           >
             Начать игру
           </button>
-          {lobby.players.length < 3 && <p class="muted small">Нужно от 3 до 5 игроков.</p>}
+          {lobby.players.length < MIN_PLAYERS && (
+            <p class="muted small">
+              Нужно от {MIN_PLAYERS} до {MAX_PLAYERS} игроков.
+            </p>
+          )}
           {missing.length > 0 && (
             <p class="muted small">Ещё не выбрали цивилизацию: {missing.map((p) => p.name).join(', ')}.</p>
           )}

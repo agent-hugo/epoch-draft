@@ -599,8 +599,59 @@ a {
   margin-left: auto;
   padding: 4px 10px;
 }
-.pass {
-  margin-top: 4px;
+.seat-hint {
+  margin: 4px 0;
+}
+.seats-edit li {
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+  padding: 10px 8px;
+  background: var(--surface);
+}
+.seats-edit li.dragging {
+  outline: 2px solid var(--accent);
+  cursor: grabbing;
+}
+.grip {
+  color: var(--muted);
+}
+
+/* in-game header: the turn and stats, then the neighbours */
+.game-bar {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding-top: 8px;
+  padding-bottom: 6px;
+}
+.bar-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.neighbours {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.neighbours .nb {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.neighbours .right {
+  text-align: right;
+}
+.neighbours .nb.next {
+  font-weight: 700;
+}
+.pass-to {
+  flex: none;
+  color: var(--accent);
+  font-weight: 600;
 }
 
 /* lobby: civilization choice */

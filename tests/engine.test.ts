@@ -16,6 +16,7 @@ import {
   waitingFor,
   allChosen,
   endTurn,
+  reseat,
   type GameState,
 } from '../src/engine';
 
@@ -42,7 +43,7 @@ function playOut(state: GameState, bots: Bot[]): GameState {
 }
 
 describe('worlds', () => {
-  it('are all valid for 3-5 players and have their images', () => {
+  it('are all valid for 3-7 players and have their images', () => {
     expect(worlds.length).toBeGreaterThan(0);
     for (const w of worlds) expect({ world: w.id, problems: problems[w.id] }).toEqual({ world: w.id, problems: [] });
   });
@@ -128,6 +129,19 @@ describe('turns', () => {
     expect(s.players[1]!.coins).toBeGreaterThan(3);
   });
 
+  it('reseats players and drops moves paid to the old neighbours', () => {
+    let s = setup(4, 1, ['egypt', 'mesopotamia', 'china', 'greece']);
+    s = choose(db, s, 'p0', { action: 'sell', card: s.players[0]!.hand[0]! }, { hold: true });
+    // p1 buys stone from its left neighbour p0 (egypt).
+    s.players[1]!.hand[0] = '1-altar';
+    s = choose(db, s, 'p1', { action: 'build', card: '1-altar', trade: { left: { stone: 1 }, right: {} } }, { hold: true });
+    const r = reseat(s, ['p2', 'p0', 'p3']);
+    expect(r.state.players.map((p) => p.id)).toEqual(['p2', 'p0', 'p3', 'p1']);
+    expect(r.dropped).toEqual(['p1']);
+    expect(Object.keys(r.state.pending)).toEqual(['p0']);
+    expect(r.state.players[1]!.hand).toEqual(s.players[0]!.hand);
+  });
+
   it('rejects illegal choices', () => {
     const s = setup(3);
     expect(() => choose(db, s, 'p0', { action: 'sell', card: 'nope' })).toThrow(RuleError);
@@ -160,7 +174,7 @@ describe('scoring', () => {
 });
 
 describe('full games', () => {
-  for (const n of [3, 4, 5]) {
+  for (const n of [3, 4, 5, 6, 7]) {
     it(`finishes with ${n} random players`, () => {
       const bots = Array.from({ length: n }, (_, k) => randomBot(100 + k));
       const end = playOut(setup(n, 7), bots);
@@ -168,6 +182,10 @@ describe('full games', () => {
       expect(end.log).toHaveLength(18 * n);
       expect(end.players.every((p) => p.hand.length === 0)).toBe(true);
       expect(end.players.every((p) => p.conflicts.length <= 6)).toBe(true);
+      // Every epoch records a conflict for each pair of neighbours, matching the tokens.
+      expect(end.battles).toHaveLength(3 * n);
+      const wins = end.battles!.reduce((s, b) => s + (b.military[0] !== b.military[1] ? 1 : 0), 0);
+      expect(end.players.reduce((s, p) => s + p.conflicts.filter((c) => c < 0).length, 0)).toBe(wins);
       // Every card ends up in a city, under a monument or in the discard.
       const used = end.players.reduce((s, p) => s + p.city.length + p.stages, 0);
       expect(used + end.discard.length).toBe(21 * n);

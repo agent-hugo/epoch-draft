@@ -56,6 +56,7 @@ export function createGame(db: Db, setup: GameSetup): GameState {
     discard: [],
     pending: {},
     log: [],
+    battles: [],
   };
   deal(db, state, rng);
   state.rng = rng.state;
@@ -184,6 +185,29 @@ export function unchoose(state: GameState, playerId: string): GameState {
   return next;
 }
 
+/**
+ * Seats the players in a new order (player ids, first to last; the left
+ * neighbour of a seat is the one before it). Ids it does not list keep their
+ * relative order after the listed ones. Choices with trades are dropped, as
+ * they paid the old neighbours; the ids of their players are returned.
+ */
+export function reseat(state: GameState, ids: string[]): { state: GameState; dropped: string[] } {
+  const next = structuredClone(state);
+  const rank = (id: string) => {
+    const k = ids.indexOf(id);
+    return k < 0 ? ids.length + state.players.findIndex((p) => p.id === id) : k;
+  };
+  next.players.sort((a, b) => rank(a.id) - rank(b.id));
+  const dropped: string[] = [];
+  for (const [id, c] of Object.entries(next.pending)) {
+    if (c.action !== 'sell' && !isTradeEmpty(c.trade)) {
+      delete next.pending[id];
+      dropped.push(id);
+    }
+  }
+  return { state: next, dropped };
+}
+
 export function waitingFor(state: GameState): string[] {
   if (state.phase !== 'play') return [];
   return state.players.filter((p) => !state.pending[p.id]).map((p) => p.id);
@@ -278,6 +302,11 @@ function passHands(state: GameState): void {
 function resolveConflicts(db: Db, state: GameState): void {
   const n = state.players.length;
   const power = state.players.map((_, i) => military(db, state, i));
+  state.battles ??= [];
+  state.players.forEach((p, i) => {
+    const j = rightOf(n, i);
+    state.battles!.push({ epoch: state.epoch, players: [p.id, state.players[j]!.id], military: [power[i]!, power[j]!] });
+  });
   state.players.forEach((p, i) => {
     for (const j of [leftOf(n, i), rightOf(n, i)]) {
       if (power[i]! > power[j]!) p.conflicts.push(VICTORY_POINTS[state.epoch]);

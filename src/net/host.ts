@@ -1,7 +1,7 @@
 import { greedyBot, type Bot } from '../engine/bots';
 import type { Db } from '../engine/db';
 import { MAX_PLAYERS, MIN_PLAYERS } from '../engine/db';
-import { choose, createGame, endTurn, playerIndex, RuleError, unchoose, waitingFor } from '../engine/rules';
+import { choose, createGame, endTurn, playerIndex, reseat, RuleError, unchoose, waitingFor } from '../engine/rules';
 import type { GameState } from '../engine/types';
 import type { Bus } from './mqtt';
 import {
@@ -152,6 +152,30 @@ export class Host {
   }
 
   /**
+   * Seats the players in a new order (ids, first to last): in the lobby and,
+   * during the game, at the table. Moves paid to the old neighbours are
+   * withdrawn and have to be made again.
+   */
+  reorder(ids: string[]): void {
+    if (this.closed || this.game?.phase === 'over') return;
+    const rank = (id: string) => {
+      const k = ids.indexOf(id);
+      return k < 0 ? ids.length : k;
+    };
+    this.lobby.players = this.lobby.players
+      .map((p, k) => ({ p, k }))
+      .sort((a, b) => rank(a.p.id) - rank(b.p.id) || a.k - b.k)
+      .map((x) => x.p);
+    if (this.game) {
+      const { state, dropped } = reseat(this.game, ids);
+      this.game = state;
+      for (const id of dropped) if (!this.bots.has(id)) this.errors.set(id, 'соседи поменялись, выберите ход заново');
+      this.runBots();
+    }
+    void this.publishAll();
+  }
+
+  /**
    * Hands a player's seat to a bot for the rest of the game. The player is
    * dropped: their hand is no longer published and their moves are ignored.
    */
@@ -179,8 +203,8 @@ export class Host {
   startGame(): void {
     if (!this.canStart()) return;
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
-    // Random seating.
-    const seats = this.lobby.players.slice().sort(() => Math.random() - 0.5);
+    // Players sit in the order of the lobby list.
+    const seats = this.lobby.players;
     // Bots and (in random mode) everybody get a random civilization.
     const manual = this.lobby.civMode === 'manual';
     const players = seats.map((p) => ({ id: p.id, name: p.name, civ: manual ? p.civ : undefined }));

@@ -140,6 +140,15 @@ export interface LogEntry {
   chain?: boolean;
 }
 
+/** A conflict between two neighbours at the end of an epoch. */
+export interface Battle {
+  epoch: Epoch;
+  /** Player ids: `players[1]` sat right of `players[0]`. */
+  players: [string, string];
+  /** Military strength of each, in the same order. */
+  military: [number, number];
+}
+
 export interface GameState {
   version: 1;
   /** World the game is played in; missing in old saves (the default world). */
@@ -155,6 +164,8 @@ export interface GameState {
   /** Choices made this turn, keyed by player id. */
   pending: Record<string, Choice>;
   log: LogEntry[];
+  /** Conflicts of the epochs played so far; missing in old saves. */
+  battles?: Battle[];
 }
 
 export interface ScoreBreakdown {

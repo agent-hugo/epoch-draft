@@ -3,7 +3,7 @@
  * Usage: [WORLD=<id>] npm run sim -- [games per player count, default 300]
  */
 import { greedyBot } from '../src/engine/bots';
-import { choose, createGame, ranking, scoreGame, waitingFor } from '../src/engine';
+import { choose, createGame, MAX_PLAYERS, MIN_PLAYERS, ranking, scoreGame, waitingFor } from '../src/engine';
 import type { GameState, ScoreBreakdown } from '../src/engine';
 import { loadDb } from '../src/worlds/node';
 
@@ -19,7 +19,7 @@ const cardStats = new Map<string, { offered: number; built: number }>();
 let playerGames = 0;
 const winnerCats = Object.fromEntries(CATS.map((c) => [c, 0])) as Record<Cat, number>;
 
-for (let n = 3; n <= 5; n++) {
+for (let n = MIN_PLAYERS; n <= MAX_PLAYERS; n++) {
   for (let g = 0; g < games; g++) {
     const seed = n * 100000 + g;
     let s: GameState = createGame(db, {
@@ -61,8 +61,8 @@ function bump(card: string, key: 'offered' | 'built') {
   cardStats.set(card, st);
 }
 
-const totalGames = games * 3;
-console.log(`\n${totalGames} games (${games} each for 3, 4, 5 players), greedy bots\n`);
+const totalGames = games * (MAX_PLAYERS - MIN_PLAYERS + 1);
+console.log(`\n${totalGames} games (${games} each for ${MIN_PLAYERS} to ${MAX_PLAYERS} players), greedy bots\n`);
 console.log('Average points per player / per winner:');
 for (const c of CATS) {
   console.log(`  ${c.padEnd(9)} ${(catSum[c] / playerGames).toFixed(1).padStart(6)} ${(winnerCats[c] / totalGames).toFixed(1).padStart(6)}`);
