@@ -172,6 +172,7 @@ try {
   await sellFirst(host, 'e0-move-confirm');
   await host.locator('.banner.ok').waitFor();
   await sellFirst(guest);
+  await confirm(host, 'Завершить ход');
   for (const p of [host, guest]) await p.locator('.bar', { hasText: 'ход 2/6' }).waitFor({ timeout: 10000 });
 
   // After the turn everybody sees what each player did.

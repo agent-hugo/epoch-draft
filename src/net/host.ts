@@ -1,7 +1,7 @@
 import { greedyBot, type Bot } from '../engine/bots';
 import type { Db } from '../engine/db';
 import { MAX_PLAYERS, MIN_PLAYERS } from '../engine/db';
-import { choose, createGame, playerIndex, RuleError, unchoose, waitingFor } from '../engine/rules';
+import { choose, createGame, endTurn, playerIndex, RuleError, unchoose, waitingFor } from '../engine/rules';
 import type { GameState } from '../engine/types';
 import type { Bus } from './mqtt';
 import {
@@ -17,6 +17,9 @@ import {
   type CivMode,
   type LobbyMsg,
 } from './protocol';
+
+/** Turns wait for the host to end them. */
+const HOLD = { hold: true };
 
 /** Engine database of a world; the default world for a missing or unknown id. */
 export type WorldDbs = (world?: string) => Db;
@@ -195,7 +198,7 @@ export class Host {
     const prev = g.pending[pid];
     if (prev && JSON.stringify(prev) === JSON.stringify(msg.choice)) return;
     try {
-      this.game = msg.choice ? choose(this.db, g, pid, msg.choice) : unchoose(g, pid);
+      this.game = msg.choice ? choose(this.db, g, pid, msg.choice, HOLD) : unchoose(g, pid);
       this.errors.delete(pid);
     } catch (e) {
       if (!(e instanceof RuleError)) throw e;
@@ -205,12 +208,27 @@ export class Host {
     void this.publishAll();
   }
 
+  /**
+   * Moves the game to the next turn once everybody has chosen. The turn is
+   * held open until the host confirms it, so moves can still be changed.
+   */
+  endTurn(): void {
+    const g = this.game;
+    if (this.closed || !g) return;
+    const next = endTurn(this.db, g);
+    if (next === g) return;
+    this.game = next;
+    this.errors.clear();
+    this.runBots();
+    void this.publishAll();
+  }
+
   private runBots() {
     while (this.game && this.game.phase === 'play') {
       const botId = waitingFor(this.game).find((id) => this.bots.has(id));
       if (!botId) return;
       const i = playerIndex(this.game, botId);
-      this.game = choose(this.db, this.game, botId, this.bots.get(botId)!(this.db, this.game, i));
+      this.game = choose(this.db, this.game, botId, this.bots.get(botId)!(this.db, this.game, i), HOLD);
     }
   }
 

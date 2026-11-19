@@ -13,6 +13,8 @@ import {
   scoreGame,
   unchoose,
   waitingFor,
+  allChosen,
+  endTurn,
   type GameState,
 } from '../src/engine';
 
@@ -103,6 +105,22 @@ describe('turns', () => {
     s = choose(db, s, 'p1', { action: 'sell', card: s.players[1]!.hand[0]! });
     s = choose(db, s, 'p2', { action: 'sell', card: s.players[2]!.hand[0]! });
     expect(s.turn).toBe(1);
+  });
+
+  it('holds a turn open until it is ended, and moves can still change', () => {
+    let s = setup(3);
+    const hold = { hold: true };
+    expect(endTurn(db, s)).toBe(s);
+    for (const p of s.players) s = choose(db, s, p.id, { action: 'sell', card: p.hand[0]! }, hold);
+    expect(allChosen(s)).toBe(true);
+    expect(s.turn).toBe(1);
+    s = unchoose(s, 'p1');
+    expect(allChosen(s)).toBe(false);
+    expect(endTurn(db, s)).toBe(s);
+    s = choose(db, s, 'p1', { action: 'sell', card: s.players[1]!.hand[1]! }, hold);
+    s = endTurn(db, s);
+    expect(s.turn).toBe(2);
+    expect(s.players[1]!.coins).toBeGreaterThan(3);
   });
 
   it('rejects illegal choices', () => {

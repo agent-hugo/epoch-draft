@@ -63,6 +63,13 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
   const turnKey = `${pub.epoch}-${pub.turn}`;
   const open = openCard.key === turnKey ? openCard.card : undefined;
   const setOpen = (card?: string) => setOpenCard({ key: turnKey, card });
+  // When everybody has chosen, the host is asked to move on to the next turn.
+  const allDone = pub.phase === 'play' && pub.players.every((p) => pub.chosen.includes(p.id));
+  // '' asks, 'cancel' leaves a banner to end the turn later, 'ok' waits for the host.
+  const [endAsk, setEndAsk] = useState<'' | 'cancel' | 'ok'>('');
+  useEffect(() => {
+    if (!allDone) setEndAsk('');
+  }, [allDone]);
   useEffect(() => {
     if (lastKey === seenTurn.current) return;
     seenTurn.current = lastKey;
@@ -89,7 +96,36 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
       </header>
       {!snap.connected && <div class="banner warn">Нет связи с брокером, переподключаемся…</div>}
       {snap.connected && !hostOnline && <div class="banner warn">Хост не в сети: игра продолжится, когда он вернётся.</div>}
-      <div class="waiting small muted">{waiting.length ? `Ждём: ${waiting.join(', ')}` : 'Все сделали выбор'}</div>
+      <div class="waiting small muted">
+        {waiting.length ? `Ждём: ${waiting.join(', ')}` : host ? 'Все сделали выбор' : 'Все сделали выбор, ждём, пока хост завершит ход'}
+      </div>
+      {host && allDone && endAsk === 'cancel' && (
+        <div class="banner">
+          Все сделали выбор.
+          <button
+            class="banner-action primary"
+            onClick={() => {
+              setEndAsk('ok');
+              host.endTurn();
+            }}
+          >
+            Завершить ход
+          </button>
+        </div>
+      )}
+      {host && allDone && endAsk === '' && !summary && (
+        <ConfirmDialog
+          ask={{
+            text: 'Все сделали выбор. Завершить ход и перейти к следующему?',
+            ok: 'Завершить ход',
+            run: () => {
+              setEndAsk('ok');
+              host.endTurn();
+            },
+          }}
+          onClose={() => setEndAsk('cancel')}
+        />
+      )}
 
       <main class="tab-body" ref={body}>
         {tab === 'hand' && (
@@ -410,7 +446,7 @@ function HandTab(props: {
     <div>
       {chosen && (
         <div class="banner ok">
-          {choiceLabel(db, chosen)}. Пока ходят остальные, выбор можно изменить или отменить.
+          {choiceLabel(db, chosen)}. Пока ход не завершён, выбор можно изменить или отменить.
           <button class="banner-action" onClick={() => choose(null)}>
             Отменить выбор
           </button>

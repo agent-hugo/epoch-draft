@@ -91,11 +91,32 @@ try {
   await shot(host, '2-others');
   await host.getByRole('button', { name: 'Рука' }).click();
 
+  // When everybody has chosen, only the host is asked to end the turn.
+  const endTurn = (p: Page) => p.getByRole('dialog').filter({ hasText: 'Завершить ход и перейти' });
+  let endChecked = false;
   let moves = 0;
   const done = (p: Page) => p.getByRole('heading', { name: /Победа|Победил/ }).isVisible();
   while (!(await done(host)) || !(await done(guest))) {
     for (const p of pages) {
       if (await done(p)) continue;
+      if (p === host && (await endTurn(host).isVisible())) {
+        const before = await host.locator('.bar').textContent();
+        if (await endTurn(guest).count()) throw new Error('the guest is asked to end the turn');
+        const text = await endTurn(host).innerText();
+        if (/Петя|Бот/.test(text)) throw new Error(`the end-turn question tells the moves: ${text}`);
+        if (!endChecked) {
+          // Cancel leaves a banner to end the turn later.
+          endChecked = true;
+          await shot(host, '3-end-turn');
+          await endTurn(host).getByRole('button', { name: 'Отмена' }).click();
+          await guest.getByText('ждём, пока хост завершит ход').waitFor();
+          await host.locator('.banner').getByRole('button', { name: 'Завершить ход' }).click();
+        } else {
+          await endTurn(host).getByRole('button', { name: 'Завершить ход' }).click();
+        }
+        await host.waitForFunction((prev) => document.querySelector('.bar')?.textContent !== prev, before, { timeout: 15000 });
+        continue;
+      }
       const summary = p.getByRole('dialog', { name: 'Итоги хода' });
       if (await summary.isVisible()) {
         if (moves > 20 && moves < 25) await shot(p, '4-summary');
@@ -135,6 +156,7 @@ try {
     }
   }
   console.log(`game over after ${moves} UI moves`);
+  if (!endChecked) throw new Error('the host was never asked to end the turn');
   await guest.getByRole('button', { name: 'Город' }).isVisible().catch(() => false);
   await shot(host, '5-final');
   const table = await host.locator('table.scores').innerText();

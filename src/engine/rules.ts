@@ -149,15 +149,29 @@ export function handOptions(db: Db, state: GameState, i: number): CardOptions[] 
 
 /**
  * Records a player's choice for the current turn (it may be changed until
- * everybody has chosen). When the last player chooses, the turn resolves.
+ * the turn resolves). When the last player chooses, the turn resolves,
+ * unless `hold` asks to leave that to {@link endTurn}.
  */
-export function choose(db: Db, state: GameState, playerId: string, choice: Choice): GameState {
+export function choose(db: Db, state: GameState, playerId: string, choice: Choice, opts: { hold?: boolean } = {}): GameState {
   const i = playerIndex(state, playerId);
   const err = validateChoice(db, state, i, choice);
   if (err) throw new RuleError(err);
   const next = structuredClone(state);
   next.pending[playerId] = choice;
-  if (next.players.every((p) => next.pending[p.id])) resolveTurn(db, next);
+  if (!opts.hold && allChosen(next)) resolveTurn(db, next);
+  return next;
+}
+
+/** Everybody has chosen and the turn can resolve. */
+export function allChosen(state: GameState): boolean {
+  return state.phase === 'play' && state.players.every((p) => state.pending[p.id]);
+}
+
+/** Resolves a turn held open by `choose(..., { hold: true })`; no-op until everybody has chosen. */
+export function endTurn(db: Db, state: GameState): GameState {
+  if (!allChosen(state)) return state;
+  const next = structuredClone(state);
+  resolveTurn(db, next);
   return next;
 }
 

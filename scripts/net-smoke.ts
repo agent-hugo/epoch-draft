@@ -60,8 +60,11 @@ for (const p of players) {
 await waitFor(() => host.lobby.players.length === 3, 'players joined');
 host.addBot();
 host.startGame();
+// The host player confirms every turn as soon as everybody has chosen.
+const ender = setInterval(() => host.endTurn(), 50);
 const t0 = Date.now();
 await waitFor(() => host.game?.phase === 'over', 'game over', 120_000);
+clearInterval(ender);
 const g = host.game!;
 console.log(`game finished in ${((Date.now() - t0) / 1000).toFixed(1)}s, ${g.log.length} moves`);
 scoreGame(db, g).forEach((s, i) => console.log(`  ${g.players[i]!.name.padEnd(16)} ${s.total}`));
