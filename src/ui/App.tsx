@@ -60,7 +60,13 @@ export function App() {
   );
 }
 
+// The world last looked at in the help outside a room.
+let helpWorld: string | undefined;
+
 function HelpOverlay({ world, onClose }: { world?: string; onClose: () => void }) {
+  // Inside a room the help shows the room's world; elsewhere any world can be browsed.
+  const [picked, setPicked] = useState(() => getWorld(helpWorld).id);
+  const shown = world ?? picked;
   return (
     <div class="game overlay">
       <header class="bar">
@@ -70,7 +76,22 @@ function HelpOverlay({ world, onClose }: { world?: string; onClose: () => void }
         </button>
       </header>
       <main class="tab-body">
-        <Reference db={worldDb(world)} />
+        {!world && worlds.length > 1 && (
+          <div class="segmented help-worlds" role="radiogroup" aria-label="Мир">
+            {worlds.map((w) => (
+              <button
+                key={w.id}
+                role="radio"
+                aria-checked={w.id === shown}
+                class={w.id === shown ? 'active' : ''}
+                onClick={() => setPicked((helpWorld = w.id))}
+              >
+                {w.name}
+              </button>
+            ))}
+          </div>
+        )}
+        <Reference db={worldDb(shown)} />
       </main>
     </div>
   );

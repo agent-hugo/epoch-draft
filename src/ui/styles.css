@@ -588,6 +588,8 @@ a {
 }
 .segmented button:last-child {
   border-radius: 0 8px 8px 0;
+}
+.segmented button + button {
   border-left: none;
 }
 .segmented button.active {
@@ -653,4 +655,8 @@ a {
 }
 .world-line {
   margin: 0 0 8px;
+}
+
+.help-worlds {
+  margin-bottom: 8px;
 }
