@@ -663,12 +663,14 @@ function CityView({ db, state, i }: { db: Db; state: GameState; i: number }) {
         {p.coins}🪙 · {military(db, state, i)}⚔️ · конфликты: {p.conflicts.length ? p.conflicts.join(' ') : '—'}
       </div>
       <div class="small">
-        {civ.monument.name}:{' '}
-        {civ.monument.stages.map((s, k) => (
-          <span key={k} class={k < p.stages ? 'stage done' : 'stage'}>
-            {k + 1}: {effectsText(db, s.effects)}
-          </span>
-        ))}
+        {civ.monument.name}:
+        <div class="stage-list">
+          {civ.monument.stages.map((s, k) => (
+            <span key={k} class={k < p.stages ? 'stage done' : 'stage'}>
+              {k + 1}: {effectsText(db, s.effects)}
+            </span>
+          ))}
+        </div>
       </div>
       <ScoreLine s={score} />
       {TYPE_ORDER.map((t) => {

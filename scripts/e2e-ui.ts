@@ -94,6 +94,7 @@ try {
   // When everybody has chosen, only the host is asked to end the turn.
   const endTurn = (p: Page) => p.getByRole('dialog').filter({ hasText: 'Завершить ход и перейти' });
   let endChecked = false;
+  let cityShot = false;
   let moves = 0;
   const done = (p: Page) => p.getByRole('heading', { name: /Победа|Победил/ }).isVisible();
   while (!(await done(host)) || !(await done(guest))) {
@@ -124,6 +125,12 @@ try {
       }
       const turnKey = await p.locator('.bar').textContent();
       if (await p.locator('.banner.ok').isVisible()) continue; // already chose this turn
+      if (shots && moves >= 30 && !cityShot && p === host) {
+        cityShot = true;
+        await host.getByRole('button', { name: 'Город' }).click();
+        await shot(host, '4-city');
+        await host.getByRole('button', { name: 'Рука' }).click();
+      }
       const cards = p.locator('.cards .card');
       if ((await cards.count()) === 0) continue;
       // Prefer a card that can be built, otherwise sell the first one.

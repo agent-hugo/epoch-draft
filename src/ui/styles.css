@@ -367,11 +367,20 @@ button.icon {
   font-weight: 600;
   color: var(--tc);
 }
+.stage-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
 .stage {
-  margin-right: 8px;
-  opacity: 0.55;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px 8px;
+  opacity: 0.6;
 }
 .stage.done {
+  border: 2px solid var(--ok);
   opacity: 1;
   font-weight: 600;
 }
