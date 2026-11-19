@@ -1,23 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { gameData } from '../src/data';
+import { problems, worldDb, worlds } from '../src/worlds';
 import { greedyBot, randomBot, type Bot } from '../src/engine/bots';
 import {
   canCover,
   checkPayment,
   choose,
   createGame,
-  Db,
   handOptions,
   paymentOptions,
   RuleError,
   scienceScore,
   scoreGame,
-  validateData,
   waitingFor,
   type GameState,
 } from '../src/engine';
 
-const db = new Db(gameData);
+const db = worldDb('ancient');
 
 function setup(n: number, seed = 1, civs?: string[]): GameState {
   return createGame(db, {
@@ -39,9 +37,14 @@ function playOut(state: GameState, bots: Bot[]): GameState {
   return s;
 }
 
-describe('data', () => {
-  it('is valid for 3-5 players', () => {
-    expect(validateData(gameData)).toEqual([]);
+describe('worlds', () => {
+  it('are all valid for 3-5 players and have their images', () => {
+    expect(worlds.length).toBeGreaterThan(0);
+    for (const w of worlds) expect({ world: w.id, problems: problems[w.id] }).toEqual({ world: w.id, problems: [] });
+  });
+
+  it('stores the world in the game state', () => {
+    expect(setup(3).world).toBe('ancient');
   });
 });
 

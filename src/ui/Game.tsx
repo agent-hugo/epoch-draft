@@ -10,7 +10,7 @@ import type { Host } from '../net/host';
 import { playerView } from '../net/protocol';
 import { Reference } from './Reference';
 import { settings } from './storage';
-import { costText, effectsText, EPOCH_NAME, resList, RES_ICON, TYPE_NAME, TYPE_ORDER } from './format';
+import { costText, effectsText, EPOCH_NAME, joined, resChoice, resList, TYPE_NAME, TYPE_ORDER } from './format';
 
 type Tab = 'hand' | 'city' | 'others' | 'help' | 'settings';
 
@@ -160,7 +160,7 @@ function ActionText({ db, state, e, pid }: { db: Db; state: GameState; e: LogEnt
         {mine ? 'построили' : 'построил(а)'} <b class={`chip t-${card.type}`}>{card.name}</b>
         {e.chain && <span class="muted"> · даром по цепочке</span>}
         {pay}
-        <div class="small muted">{effectsText(card.effects)}</div>
+        <div class="small muted">{effectsText(db, card.effects)}</div>
       </>
     );
   if (e.action === 'stage') {
@@ -170,7 +170,7 @@ function ActionText({ db, state, e, pid }: { db: Db; state: GameState; e: LogEnt
       <>
         {mine ? 'возвели' : 'возвёл(а)'} 🏛️ стадию {stageNo} сооружения{mine && ` картой «${card.name}»`}
         {pay}
-        {stage && <div class="small muted">{effectsText(stage.effects)}</div>}
+        {stage && <div class="small muted">{effectsText(db, stage.effects)}</div>}
       </>
     );
   }
@@ -444,7 +444,7 @@ function HandTab(props: {
         {stageCost && (
           <>
             {' '}
-            · следующая: {costText(stageCost)} → {effectsText(civ.monument.stages[me.stages]!.effects)}
+            · следующая: {costText(db, stageCost)} → {effectsText(db, civ.monument.stages[me.stages]!.effects)}
           </>
         )}
       </div>
@@ -458,6 +458,7 @@ function HandTab(props: {
               <button class="card-head" onClick={() => setOpen(open === o.card ? undefined : o.card)}>
                 <CardFace db={db} card={card} chain={o.chain} affordable={o.build.length > 0} />
               </button>
+              {open === o.card && card.img && <img class="card-img" src={card.img} alt="" />}
               {open === o.card && (
                 <CardActions
                   db={db}
@@ -494,8 +495,8 @@ function ChoiceText(props: { db: Db; me: PlayerState; o: CardOptions; choice: Ch
   const cost = choice.action === 'stage' ? nextStageCost(db, me) : card.cost;
   const price = (
     <>
-      <div>Цена: {chain ? 'бесплатно по цепочке' : cost ? costText(cost) : '—'}</div>
-      {!chain && pay && pay.total > 0 && <div>Платите: {payLabel(pay)}</div>}
+      <div>Цена: {chain ? 'бесплатно по цепочке' : cost ? costText(db, cost) : '—'}</div>
+      {!chain && pay && pay.total > 0 && <div>Платите: {payLabel(db, pay)}</div>}
     </>
   );
   if (choice.action === 'sell')
@@ -510,7 +511,7 @@ function ChoiceText(props: { db: Db; me: PlayerState; o: CardOptions; choice: Ch
     return (
       <div class="choice-text">
         <b>Построить стадию {me.stages + 1} сооружения?</b>
-        <div>Стадия даст: {effectsText(stage.effects)}</div>
+        <div>Стадия даст: {effectsText(db, stage.effects)}</div>
         {price}
         <div class="small muted">Карта «{card.name}» уйдёт на стадию, её эффект не сработает.</div>
       </div>
@@ -519,7 +520,7 @@ function ChoiceText(props: { db: Db; me: PlayerState; o: CardOptions; choice: Ch
   return (
     <div class="choice-text">
       <b>Построить «{card.name}»?</b>
-      <div>Эффект: {effectsText(card.effects)}</div>
+      <div>Эффект: {effectsText(db, card.effects)}</div>
       <div>Оплата: {price}</div>
     </div>
   );
@@ -539,10 +540,10 @@ function CardFace({ db, card, chain, affordable }: { db: Db; card: CardDef; chai
         <span class="name">{card.name}</span>
         <span class="type">{TYPE_NAME[card.type]}</span>
       </div>
-      <div class="effects">{effectsText(card.effects)}</div>
+      <div class="effects">{effectsText(db, card.effects)}</div>
       <div class="meta small">
         <span class={affordable === false ? 'cant' : ''}>
-          {chain ? 'бесплатно по цепочке' : `цена: ${costText(card.cost)}`}
+          {chain ? 'бесплатно по цепочке' : <>цена: {costText(db, card.cost)}</>}
         </span>
         {card.chainsTo && <span class="muted"> · даром потом: {card.chainsTo.map((id) => db.card(id).name).join(', ')}</span>}
       </div>
@@ -550,12 +551,12 @@ function CardFace({ db, card, chain, affordable }: { db: Db; card: CardDef; chai
   );
 }
 
-function payLabel(p: PaymentOption): string {
+function payLabel(db: Db, p: PaymentOption): ComponentChildren {
   if (p.left === 0 && p.right === 0) return p.total ? `${p.total}🪙` : 'бесплатно';
-  const parts = [];
-  if (p.left) parts.push(`◀ ${resList(p.trade.left)} за ${p.left}🪙`);
-  if (p.right) parts.push(`▶ ${resList(p.trade.right)} за ${p.right}🪙`);
-  return parts.join(', ');
+  const parts: ComponentChildren[] = [];
+  if (p.left) parts.push(<>◀ {resList(db, p.trade.left)} за {p.left}🪙</>);
+  if (p.right) parts.push(<>▶ {resList(db, p.trade.right)} за {p.right}🪙</>);
+  return joined(parts, ', ');
 }
 
 function CardActions(props: {
@@ -577,7 +578,7 @@ function CardActions(props: {
       ) : (
         o.build.slice(0, 3).map((p, k) => (
           <button key={`b${k}`} class="primary" onClick={() => props.onChoose({ action: 'build', card: o.card, trade: p.trade }, p)}>
-            Построить{o.build.length > 1 || p.total ? `: ${payLabel(p)}` : ''}
+            Построить{(o.build.length > 1 || p.total > 0) && <>: {payLabel(props.db, p)}</>}
           </button>
         ))
       )}
@@ -586,7 +587,7 @@ function CardActions(props: {
           o.stage.slice(0, 2).map((p, k) => (
             <button key={`s${k}`} onClick={() => props.onChoose({ action: 'stage', card: o.card, trade: p.trade }, p)}>
               Стадия {props.stageNo}
-              {p.total ? `: ${payLabel(p)}` : ''}
+              {p.total > 0 && <>: {payLabel(props.db, p)}</>}
             </button>
           ))
         ) : (
@@ -597,11 +598,10 @@ function CardActions(props: {
   );
 }
 
-function productionText(db: Db, p: PlayerState): string {
-  const prod = production(db, p);
-  const fixed = resList(prod.fixed);
-  const choices = prod.choices.map((c) => c.map((r) => RES_ICON[r]).join('/'));
-  return [fixed, ...choices].filter(Boolean).join(' ') || '—';
+function productionText(db: Db, p: PlayerState, tradableOnly = false): ComponentChildren {
+  const prod = production(db, p, tradableOnly);
+  const parts = [resList(db, prod.fixed), ...prod.choices.map((c) => resChoice(db, c))].filter(Boolean);
+  return parts.length ? joined(parts, ' ') : '—';
 }
 
 function CityView({ db, state, i }: { db: Db; state: GameState; i: number }) {
@@ -621,7 +621,7 @@ function CityView({ db, state, i }: { db: Db; state: GameState; i: number }) {
         {civ.monument.name}:{' '}
         {civ.monument.stages.map((s, k) => (
           <span key={k} class={k < p.stages ? 'stage done' : 'stage'}>
-            {k + 1}: {effectsText(s.effects)}
+            {k + 1}: {effectsText(db, s.effects)}
           </span>
         ))}
       </div>
@@ -634,7 +634,7 @@ function CityView({ db, state, i }: { db: Db; state: GameState; i: number }) {
             <div class={`group-title t-${t}`}>{TYPE_NAME[t]}</div>
             {cards.map((c) => (
               <div key={c.id} class="mini">
-                <span>{c.name}</span> <span class="muted">{effectsText(c.effects)}</span>
+                <span>{c.name}</span> <span class="muted">{effectsText(db, c.effects)}</span>
               </div>
             ))}
           </div>
@@ -673,9 +673,7 @@ function Others({ db, state, me }: { db: Db; state: GameState; me: number }) {
               </span>
             </summary>
             <LastAction db={db} state={state} k={k} pid={pid} />
-            <div class="small">Продаёт: {resList(production(db, p, true).fixed) || '—'}{' '}
-              {production(db, p, true).choices.map((c) => c.map((r) => RES_ICON[r]).join('/')).join(' ')}
-            </div>
+            <div class="small">Продаёт: {productionText(db, p, true)}</div>
             {TYPE_ORDER.map((t) => {
               const cards = p.city.map((id) => db.card(id)).filter((c) => c.type === t);
               if (!cards.length) return null;

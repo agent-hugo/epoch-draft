@@ -4,7 +4,6 @@ import { handOptions } from './rules';
 import { Rng } from './rng';
 import { count, military, scorePlayer } from './scoring';
 import type { Choice, GameState } from './types';
-import { RESOURCES } from './types';
 
 export type Bot = (db: Db, state: GameState, i: number) => Choice;
 
@@ -88,7 +87,7 @@ function evaluate(db: Db, state: GameState, i: number, w: GreedyWeights): number
   const score = scorePlayer(db, state, i);
   const remaining = 3 - state.epoch + (6 - state.turn) / 6;
   const prod = production(db, p);
-  const units = RESOURCES.reduce((s, r) => s + (prod.fixed[r] ?? 0), 0) + prod.choices.length;
+  const units = Object.values(prod.fixed).reduce<number>((s, v) => s + (v ?? 0), 0) + prod.choices.length;
   const n = state.players.length;
   const mine = military(db, state, i);
   const epochsLeft = 4 - state.epoch;

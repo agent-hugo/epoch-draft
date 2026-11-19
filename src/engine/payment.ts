@@ -1,6 +1,5 @@
 import type { Db } from './db';
 import type { Cost, Effect, GameState, PlayerState, Resource, ResourceMap, Side, Trade } from './types';
-import { RESOURCES } from './types';
 
 export const BASE_TRADE_PRICE = 2;
 
@@ -50,7 +49,7 @@ export function production(db: Db, p: PlayerState, tradableOnly = false): Produc
 }
 
 export function addInto(target: ResourceMap, add: ResourceMap): ResourceMap {
-  for (const r of RESOURCES) {
+  for (const r of Object.keys(add)) {
     const v = add[r];
     if (v) target[r] = (target[r] ?? 0) + v;
   }
@@ -58,18 +57,18 @@ export function addInto(target: ResourceMap, add: ResourceMap): ResourceMap {
 }
 
 function isEmpty(m: ResourceMap): boolean {
-  return RESOURCES.every((r) => !m[r]);
+  return Object.values(m).every((v) => !v);
 }
 
 /** Can the production supply all of `need` in one turn? */
 export function canCover(prod: Production, need: ResourceMap): boolean {
   const rest: ResourceMap = {};
-  for (const r of RESOURCES) {
+  for (const r of Object.keys(need)) {
     const left = (need[r] ?? 0) - (prod.fixed[r] ?? 0);
     if (left > 0) rest[r] = left;
   }
   if (isEmpty(rest)) return true;
-  const missing = RESOURCES.reduce((s, r) => s + (rest[r] ?? 0), 0);
+  const missing = Object.values(rest).reduce<number>((s, v) => s + (v ?? 0), 0);
   if (missing > prod.choices.length) return false;
   return assign(prod.choices, 0, rest, missing);
 }
@@ -103,7 +102,7 @@ export function tradePrice(db: Db, p: PlayerState, side: Side, res: Resource): n
 
 export function tradeCost(db: Db, p: PlayerState, side: Side, bought: ResourceMap): number {
   let sum = 0;
-  for (const r of RESOURCES) sum += (bought[r] ?? 0) * tradePrice(db, p, side, r);
+  for (const r of Object.keys(bought)) sum += (bought[r] ?? 0) * tradePrice(db, p, side, r);
   return sum;
 }
 
@@ -132,7 +131,7 @@ export function paymentOptions(db: Db, state: GameState, i: number, cost: Cost):
 
   const leftProd = production(db, neighbour(state, i, 'left'), true);
   const rightProd = production(db, neighbour(state, i, 'right'), true);
-  const needed = RESOURCES.filter((r) => (need[r] ?? 0) > 0);
+  const needed = db.resourceIds.filter((r) => (need[r] ?? 0) > 0);
   const found: PaymentOption[] = [];
 
   const walk = (k: number, left: ResourceMap, right: ResourceMap) => {
@@ -185,7 +184,8 @@ export function checkPayment(
   const p = state.players[i]!;
   const need = cost.res ?? {};
   const selfNeed: ResourceMap = {};
-  for (const r of RESOURCES) {
+  for (const r of new Set([...Object.keys(need), ...Object.keys(trade.left), ...Object.keys(trade.right)])) {
+    if (!db.resources.has(r)) return { error: `unknown resource ${r}` };
     const l = trade.left[r] ?? 0;
     const rr = trade.right[r] ?? 0;
     if (l < 0 || rr < 0 || !Number.isInteger(l) || !Number.isInteger(rr)) return { error: 'bad trade amount' };

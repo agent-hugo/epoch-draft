@@ -103,6 +103,12 @@ try {
   await guest.getByRole('button', { name: /Справка по игре/ }).click();
   await guest.getByRole('button', { name: 'Закрыть' }).click();
 
+  // The world of the room is shown to everybody; with several worlds the host picks it.
+  await guest.getByRole('heading', { name: 'Мир' }).waitFor();
+  await guest.getByText('Древний мир', { exact: true }).waitFor();
+  await host.getByRole('heading', { name: 'Мир' }).scrollIntoViewIfNeeded();
+  await shot(host, 'e0-lobby');
+
   // Civilizations picked by the players.
   await host.getByRole('radio', { name: /Выбор игроков/ }).click();
   await host.getByRole('button', { name: /^Египет/ }).click();

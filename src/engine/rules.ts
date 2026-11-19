@@ -47,6 +47,7 @@ export function createGame(db: Db, setup: GameSetup): GameState {
 
   const state: GameState = {
     version: 1,
+    ...(db.data.id ? { world: db.data.id } : {}),
     rng: 0,
     epoch: 1,
     turn: 1,

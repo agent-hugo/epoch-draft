@@ -2,8 +2,8 @@ import type { ComponentChildren } from 'preact';
 import { HAND_SIZE, TURNS_PER_EPOCH, type Db } from '../engine/db';
 import { START_COINS } from '../engine/rules';
 import type { CardDef, CardType, Epoch } from '../engine/types';
-import { GOODS, RAW } from '../engine/types';
-import { costText, effectsText, EPOCH_NAME, RES_ICON, RES_NAME, SCHOOL_ICON, SCHOOL_NAME, TYPE_NAME, TYPE_ORDER } from './format';
+import { getWorld } from '../worlds';
+import { costText, effectsText, EPOCH_NAME, Icon, joined, ResIcon, TYPE_NAME, TYPE_ORDER } from './format';
 
 const TYPE_HINT: Record<CardType, string> = {
   raw: 'дают сырьё; соседи могут его покупать',
@@ -37,6 +37,10 @@ function Section({ id, title, children }: { id: string; title: string; children:
 /** The legend: icons, card types, civilizations and every card in the deck. */
 export function Reference({ db, highlightCiv }: { db: Db; highlightCiv?: string }) {
   const civs = [...db.civs.values()];
+  const world = getWorld(db.data.id);
+  const resources = [...db.resources.values()];
+  const schools = [...db.schools.values()];
+  const [r1, r2] = resources;
   const byEpoch = (e: Epoch, dynasty: boolean) =>
     [...db.cards.values()]
       .filter((c) => c.epoch === e && (c.type === 'dynasty') === dynasty)
@@ -44,6 +48,10 @@ export function Reference({ db, highlightCiv }: { db: Db; highlightCiv?: string 
 
   return (
     <div class="reference">
+      <p class="small muted world-line">
+        Мир: <b>{world.name}</b>
+        {world.description && <> — {world.description}</>}
+      </p>
       <Section id="rules" title="Правила игры">
         <ul class="rules-list">
           <li>
@@ -109,7 +117,7 @@ export function Reference({ db, highlightCiv }: { db: Db; highlightCiv?: string 
               </li>
               <li>
                 <b>наука</b> — за каждую школу: 1 символ — 1⭐, 2 — 3⭐, 3 — 6⭐, 4 — 10⭐ и т. д., плюс 7⭐ за каждый
-                полный набор из трёх разных школ.
+                полный набор из {schools.length} разных школ.
               </li>
             </ul>
           </li>
@@ -119,22 +127,42 @@ export function Reference({ db, highlightCiv }: { db: Db; highlightCiv?: string 
       <Section id="icons" title="Значки">
         <table class="legend">
           <tbody>
-            {RAW.map((r) => (
-              <Row key={r} icon={RES_ICON[r]} text={`${RES_NAME[r]} (сырьё)`} />
-            ))}
-            {GOODS.map((r) => (
-              <Row key={r} icon={RES_ICON[r]} text={`${RES_NAME[r]} (товар)`} />
-            ))}
-            <Row icon={`${RES_ICON.wood}/${RES_ICON.stone}`} text="один ресурс на выбор, каждый ход заново" />
+            {(['raw', 'goods'] as const).map((kind) =>
+              resources
+                .filter((r) => r.kind === kind)
+                .map((r) => <Row key={r.id} icon={<Icon def={r} />} text={`${r.name} (${kind === 'raw' ? 'сырьё' : 'товар'})`} />),
+            )}
+            {r1 && r2 && (
+              <Row
+                icon={
+                  <>
+                    <Icon def={r1} />/<Icon def={r2} />
+                  </>
+                }
+                text="один ресурс на выбор, каждый ход заново"
+              />
+            )}
             <Row icon="🪙" text="монеты; в конце игры каждые 3 монеты = 1⭐" />
             <Row icon="⭐" text="очки победы" />
             <Row icon="⚔️" text="сила армии" />
-            {(['astronomy', 'medicine', 'writing'] as const).map((s) => (
-              <Row key={s} icon={SCHOOL_ICON[s]} text={`научная школа: ${SCHOOL_NAME[s]}`} />
+            {schools.map((s) => (
+              <Row key={s.id} icon={<Icon def={s} />} text={`научная школа: ${s.name}`} />
             ))}
-            <Row icon="🔭/⚕️/✒️" text="любая школа на выбор (выбирается при подсчёте наиболее выгодно)" />
+            <Row
+              icon={joined(schools.map((s) => <Icon def={s} />), '/')}
+              text="любая школа на выбор (выбирается при подсчёте наиболее выгодно)"
+            />
             <Row icon="◀ ▶" text="левый / правый сосед; ◀▶ — оба" />
-            <Row icon={`◀ ${RES_ICON.wood} по 1🪙`} text="покупка этих ресурсов у соседа по 1 монете вместо 2" />
+            {r1 && (
+              <Row
+                icon={
+                  <>
+                    ◀ <Icon def={r1} /> по 1🪙
+                  </>
+                }
+                text="покупка этих ресурсов у соседа по 1 монете вместо 2"
+              />
+            )}
             <Row icon="🏛️" text="стадии Великого сооружения" />
             <Row icon="даром потом" text="эта карта позволит бесплатно построить указанные карты следующих эпох" />
           </tbody>
@@ -152,14 +180,15 @@ export function Reference({ db, highlightCiv }: { db: Db; highlightCiv?: string 
       <Section id="civs" title="Цивилизации и сооружения">
         {civs.map((c) => (
           <div key={c.id} class={c.id === highlightCiv ? 'civ mine' : 'civ'}>
+            {c.img && <img class="civ-img" src={c.img} alt="" />}
             <div>
-              <b>{c.name}</b> · старт: {RES_ICON[c.start]} {RES_NAME[c.start]}
+              <b>{c.name}</b> · старт: <ResIcon db={db} id={c.start} /> {db.resources.get(c.start)?.name}
             </div>
             <div class="muted small">{c.monument.name}</div>
             <ol class="stages">
               {c.monument.stages.map((s, k) => (
                 <li key={k}>
-                  {costText(s.cost)} → {effectsText(s.effects)}
+                  {costText(db, s.cost)} → {effectsText(db, s.effects)}
                 </li>
               ))}
             </ol>
@@ -180,7 +209,7 @@ export function Reference({ db, highlightCiv }: { db: Db; highlightCiv?: string 
   );
 }
 
-function Row({ icon, text }: { icon: string; text: string }) {
+function Row({ icon, text }: { icon: ComponentChildren; text: string }) {
   return (
     <tr>
       <td class="icon-cell">{icon}</td>
@@ -201,13 +230,14 @@ function CardList({ db, cards }: { db: Db; cards: CardDef[] }) {
         const from = db.chainedFrom.get(c.id);
         return (
           <li key={c.id} class={`t-${c.type}`}>
+            {c.img && <img class="civ-img" src={c.img} alt="" />}
             <div class="title">
               <b>{c.name}</b>
               <span class="chip">{TYPE_NAME[c.type]}</span>
             </div>
-            <div>{effectsText(c.effects)}</div>
+            <div>{effectsText(db, c.effects)}</div>
             <div class="small muted">
-              цена: {costText(c.cost)}
+              цена: {costText(db, c.cost)}
               {from && <> · даром, если есть: {from.map((id) => db.card(id).name).join(', ')}</>}
               {c.chainsTo && <> · даром потом: {c.chainsTo.map((id) => db.card(id).name).join(', ')}</>}
               {copiesText(c) && <> · копии: {copiesText(c)}</>}

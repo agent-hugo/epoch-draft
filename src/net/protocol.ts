@@ -41,6 +41,8 @@ export interface LobbyMsg {
   started: boolean;
   /** Missing means random. */
   civMode?: CivMode;
+  /** World id; missing means the default world. */
+  world?: string;
 }
 
 export interface JoinMsg {

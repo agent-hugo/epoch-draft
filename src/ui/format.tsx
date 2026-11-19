@@ -1,28 +1,31 @@
-import type { CardType, Cost, Counter, Effect, Resource, ResourceMap, School } from '../engine/types';
-import { RESOURCES } from '../engine/types';
+import type { ComponentChildren } from 'preact';
+import type { Db } from '../engine/db';
+import type { CardType, Cost, Counter, Effect, Resource, ResourceMap } from '../engine/types';
 
-export const RES_ICON: Record<Resource, string> = {
-  wood: '🪵',
-  stone: '🪨',
-  clay: '🧱',
-  ore: '⛏️',
-  cloth: '🧵',
-  papyrus: '📜',
-  glass: '🔮',
-};
+/** A world icon: an image when the world has one, the text icon otherwise. */
+export function Icon({ def }: { def?: { icon: string; img?: string; name: string } }) {
+  if (!def) return <>?</>;
+  return def.img ? <img class="ico" src={def.img} alt={def.icon} title={def.name} /> : <>{def.icon}</>;
+}
 
-export const RES_NAME: Record<Resource, string> = {
-  wood: 'дерево',
-  stone: 'камень',
-  clay: 'глина',
-  ore: 'руда',
-  cloth: 'ткань',
-  papyrus: 'папирус',
-  glass: 'стекло',
-};
+export function ResIcon({ db, id }: { db: Db; id: Resource }) {
+  return <Icon def={db.resources.get(id)} />;
+}
 
-export const SCHOOL_ICON: Record<School, string> = { astronomy: '🔭', medicine: '⚕️', writing: '✒️' };
-export const SCHOOL_NAME: Record<School, string> = { astronomy: 'Астрономия', medicine: 'Медицина', writing: 'Письменность' };
+/** Items separated by `sep`. */
+export function joined(items: ComponentChildren[], sep: ComponentChildren): ComponentChildren {
+  return items.map((it, k) => (
+    <>
+      {k > 0 && sep}
+      {it}
+    </>
+  ));
+}
+
+/** Alternatives like 🪵/🧱. */
+export function resChoice(db: Db, options: Resource[]): ComponentChildren {
+  return joined(options.map((r) => <ResIcon db={db} id={r} />), '/');
+}
 
 export const TYPE_NAME: Record<CardType, string> = {
   raw: 'Сырьё',
@@ -38,17 +41,19 @@ export const TYPE_ORDER: CardType[] = ['raw', 'goods', 'culture', 'trade', 'mili
 
 export const EPOCH_NAME = ['', 'I', 'II', 'III'];
 
-export function resList(m: ResourceMap): string {
-  return RESOURCES.filter((r) => m[r])
-    .map((r) => RES_ICON[r].repeat(m[r]!))
-    .join('');
+/** Resources as repeated icons; null when there are none. */
+export function resList(db: Db, m: ResourceMap): ComponentChildren {
+  const ids = db.resourceIds.filter((r) => m[r]);
+  if (!ids.length) return null;
+  return ids.flatMap((r) => Array.from({ length: m[r]! }, () => <ResIcon db={db} id={r} />));
 }
 
-export function costText(cost: Cost): string {
-  const parts: string[] = [];
+export function costText(db: Db, cost: Cost): ComponentChildren {
+  const parts: ComponentChildren[] = [];
   if (cost.coins) parts.push(`${cost.coins}🪙`);
-  if (cost.res) parts.push(resList(cost.res));
-  return parts.join(' ') || 'бесплатно';
+  const res = cost.res && resList(db, cost.res);
+  if (res) parts.push(res);
+  return parts.length ? joined(parts, ' ') : 'бесплатно';
 }
 
 const WHAT_NAME: Record<string, string> = {
@@ -73,12 +78,12 @@ function counterText(c: Counter): string {
   return `за ${subject} ${whose}`;
 }
 
-export function effectText(e: Effect): string {
+export function effectText(db: Db, e: Effect): ComponentChildren {
   switch (e.kind) {
     case 'produce':
-      return resList(e.res);
+      return resList(db, e.res);
     case 'produceChoice':
-      return e.options.map((r) => RES_ICON[r]).join('/');
+      return resChoice(db, e.options);
     case 'points':
       return `${e.n}⭐`;
     case 'coins':
@@ -86,10 +91,16 @@ export function effectText(e: Effect): string {
     case 'military':
       return '⚔️'.repeat(e.n);
     case 'science':
-      return e.school === 'any' ? '🔭/⚕️/✒️' : SCHOOL_ICON[e.school];
+      return e.school === 'any'
+        ? joined([...db.schools.values()].map((s) => <Icon def={s} />), '/')
+        : <Icon def={db.schools.get(e.school)} />;
     case 'tradeDiscount': {
       const side = e.sides.length === 2 ? '◀▶' : e.sides[0] === 'left' ? '◀' : '▶';
-      return `${side} ${e.resources.map((r) => RES_ICON[r]).join('')} по ${e.price}🪙`;
+      return (
+        <>
+          {side} {e.resources.map((r) => <ResIcon db={db} id={r} />)} по {e.price}🪙
+        </>
+      );
     }
     case 'coinsPer':
       return `+${e.n}🪙 ${counterText(e.count)}`;
@@ -98,6 +109,6 @@ export function effectText(e: Effect): string {
   }
 }
 
-export function effectsText(effects: Effect[]): string {
-  return effects.map(effectText).join(' · ');
+export function effectsText(db: Db, effects: Effect[]): ComponentChildren {
+  return joined(effects.map((e) => effectText(db, e)), ' · ');
 }

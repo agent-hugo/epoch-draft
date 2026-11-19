@@ -1,13 +1,13 @@
 /**
  * Plays many bot games and prints balance statistics.
- * Usage: npm run sim -- [games per player count, default 300]
+ * Usage: [WORLD=<id>] npm run sim -- [games per player count, default 300]
  */
-import { gameData } from '../src/data';
 import { greedyBot } from '../src/engine/bots';
-import { choose, createGame, Db, ranking, scoreGame, waitingFor } from '../src/engine';
+import { choose, createGame, ranking, scoreGame, waitingFor } from '../src/engine';
 import type { GameState, ScoreBreakdown } from '../src/engine';
+import { loadDb } from '../src/worlds/node';
 
-const db = new Db(gameData);
+const db = loadDb(process.env.WORLD);
 const games = Number(process.argv[2] ?? 300);
 
 type Cat = keyof ScoreBreakdown;

@@ -18,7 +18,8 @@ import {
   type LobbyMsg,
 } from './protocol';
 
-const BOT_NAMES = ['Бот Хаммурапи', 'Бот Клеопатра', 'Бот Конфуций', 'Бот Перикл', 'Бот Цезарь'];
+/** Engine database of a world; the default world for a missing or unknown id. */
+export type WorldDbs = (world?: string) => Db;
 
 /**
  * Authoritative game host. Runs in the browser of the player who created
@@ -34,12 +35,17 @@ export class Host {
   private closed = false;
 
   constructor(
-    private db: Db,
+    private dbs: WorldDbs,
     private bus: Bus,
     private room: string,
     hostPlayerId: string,
   ) {
     this.lobby = { host: hostPlayerId, players: [], started: false };
+  }
+
+  /** The world of the game, or the one picked in the lobby. */
+  private get db(): Db {
+    return this.dbs(this.game?.world ?? this.lobby.world);
   }
 
   /** Restores a previous session from the broker (if any) and starts listening. */
@@ -104,6 +110,14 @@ export class Host {
       p.civ = civ;
   }
 
+  /** Switches the world in the lobby; civilization picks are dropped. */
+  setWorld(world: string): void {
+    if (this.lobby.started || this.dbs(world).data.id !== world) return;
+    this.lobby.world = world;
+    for (const p of this.lobby.players) delete p.civ;
+    void this.publishAll();
+  }
+
   setCivMode(mode: CivMode): void {
     if (this.lobby.started) return;
     this.lobby.civMode = mode;
@@ -120,7 +134,8 @@ export class Host {
     if (this.lobby.started || this.lobby.players.length >= MAX_PLAYERS) return;
     const id = `bot-${randomId().slice(0, 6)}`;
     const used = new Set(this.lobby.players.map((p) => p.name));
-    const name = BOT_NAMES.find((n) => !used.has(n)) ?? `Бот ${this.lobby.players.length + 1}`;
+    const names = (this.db.data.bots ?? []).map((n) => `Бот ${n}`);
+    const name = names.find((n) => !used.has(n)) ?? `Бот ${this.lobby.players.length + 1}`;
     this.lobby.players.push({ id, name, bot: true });
     this.bots.set(id, this.makeBot(id));
     void this.publishAll();

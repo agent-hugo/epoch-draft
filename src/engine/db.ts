@@ -1,4 +1,4 @@
-import type { CardDef, CivDef, Epoch, GameData } from './types';
+import type { CardDef, CivDef, Cost, Effect, Epoch, GameData, ResourceDef, SchoolDef } from './types';
 
 export const HAND_SIZE = 7;
 export const TURNS_PER_EPOCH = 6;
@@ -9,10 +9,17 @@ export const MAX_PLAYERS = 5;
 export class Db {
   readonly cards = new Map<string, CardDef>();
   readonly civs = new Map<string, CivDef>();
+  readonly resources = new Map<string, ResourceDef>();
+  readonly schools = new Map<string, SchoolDef>();
+  /** Resource ids in display order. */
+  readonly resourceIds: string[];
   /** card id -> ids of cards whose presence makes it free */
   readonly chainedFrom = new Map<string, string[]>();
 
   constructor(readonly data: GameData) {
+    for (const r of data.resources) this.resources.set(r.id, r);
+    for (const s of data.schools) this.schools.set(s.id, s);
+    this.resourceIds = data.resources.map((r) => r.id);
     for (const c of data.cards) this.cards.set(c.id, c);
     for (const c of data.civs) this.civs.set(c.id, c);
     for (const c of data.cards) {
@@ -57,7 +64,26 @@ export function validateData(data: GameData): string[] {
   const db = new Db(data);
   if (db.cards.size !== data.cards.length) errors.push('duplicate card ids');
   if (db.civs.size !== data.civs.length) errors.push('duplicate civilization ids');
+  if (db.resources.size !== data.resources.length) errors.push('duplicate resource ids');
+  if (db.schools.size !== data.schools.length) errors.push('duplicate school ids');
+  if (!data.schools.length) errors.push('no science schools');
+  if (data.schools.some((s) => s.id === 'any')) errors.push('school id "any" is reserved');
+  for (const r of data.resources) if (r.kind !== 'raw' && r.kind !== 'goods') errors.push(`${r.id}: bad resource kind`);
+  const res = (where: string, ids: string[]) => {
+    for (const r of ids) if (!db.resources.has(r)) errors.push(`${where}: unknown resource ${r}`);
+  };
+  const cost = (where: string, c: Cost) => res(where, Object.keys(c.res ?? {}));
+  const effects = (where: string, list: Effect[]) => {
+    for (const e of list) {
+      if (e.kind === 'produce') res(where, Object.keys(e.res));
+      else if (e.kind === 'produceChoice' || e.kind === 'tradeDiscount') res(where, e.kind === 'produceChoice' ? e.options : e.resources);
+      else if (e.kind === 'science' && e.school !== 'any' && !db.schools.has(e.school))
+        errors.push(`${where}: unknown school ${e.school}`);
+    }
+  };
   for (const c of data.cards) {
+    cost(c.id, c.cost);
+    effects(c.id, c.effects);
     for (const to of c.chainsTo ?? []) {
       const target = db.cards.get(to);
       if (!target) errors.push(`${c.id}: chain target ${to} does not exist`);
@@ -67,6 +93,11 @@ export function validateData(data: GameData): string[] {
   }
   for (const civ of data.civs) {
     if (civ.monument.stages.length !== 3) errors.push(`${civ.id}: monument must have 3 stages`);
+    res(civ.id, [civ.start]);
+    civ.monument.stages.forEach((s, k) => {
+      cost(`${civ.id} stage ${k + 1}`, s.cost);
+      effects(`${civ.id} stage ${k + 1}`, s.effects);
+    });
   }
   if (data.civs.length < MAX_PLAYERS) errors.push('not enough civilizations');
   const dyn = db.dynasties().length;

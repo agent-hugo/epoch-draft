@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
-import { gameData } from '../data';
-import { Db } from '../engine/db';
+import type { Db } from '../engine/db';
 import { Player, replacedByBot, type ClientSnapshot } from '../net/client';
 import { Host } from '../net/host';
 import { Bus } from '../net/mqtt';
 import { normalizeRoom, randomRoomCode, topics, type LobbyMsg } from '../net/protocol';
-import { effectsText, RES_ICON, RES_NAME } from './format';
+import { getWorld, worldDb, worlds } from '../worlds';
+import { effectsText, joined, ResIcon } from './format';
 import { Game } from './Game';
 import { Reference } from './Reference';
 import { settings } from './storage';
-
-export const db = new Db(gameData);
 
 function readHash(): URLSearchParams {
   return new URLSearchParams(location.hash.replace(/^#/, ''));
@@ -46,8 +44,9 @@ export function App() {
 
   // Help is an overlay, so opening it does not unmount the room (and drop
   // the broker connection) underneath.
-  const [help, setHelp] = useState(false);
-  const onHelp = () => setHelp(true);
+  // Help shows the world of the room, if known.
+  const [help, setHelp] = useState<{ world?: string }>();
+  const onHelp = (world?: string) => setHelp({ world });
 
   let screen;
   if (showSettings) screen = <Settings onDone={() => setShowSettings(false)} onHelp={onHelp} />;
@@ -56,12 +55,12 @@ export function App() {
   return (
     <>
       {screen}
-      {help && <HelpOverlay onClose={() => setHelp(false)} />}
+      {help && <HelpOverlay world={help.world} onClose={() => setHelp(undefined)} />}
     </>
   );
 }
 
-function HelpOverlay({ onClose }: { onClose: () => void }) {
+function HelpOverlay({ world, onClose }: { world?: string; onClose: () => void }) {
   return (
     <div class="game overlay">
       <header class="bar">
@@ -71,21 +70,21 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
         </button>
       </header>
       <main class="tab-body">
-        <Reference db={db} />
+        <Reference db={worldDb(world)} />
       </main>
     </div>
   );
 }
 
-function HelpButton({ onHelp }: { onHelp: () => void }) {
+function HelpButton({ onHelp }: { onHelp: (world?: string) => void }) {
   return (
-    <button class="link" onClick={onHelp}>
+    <button class="link" onClick={() => onHelp()}>
       📖 Справка по игре
     </button>
   );
 }
 
-function Settings({ onDone, onHelp }: { onDone: () => void; onHelp: () => void }) {
+function Settings({ onDone, onHelp }: { onDone: () => void; onHelp: (world?: string) => void }) {
   const [name, setName] = useState(settings.name);
   const [token, setToken] = useState(settings.token);
   const [url, setUrl] = useState(settings.brokerUrl);
@@ -129,7 +128,7 @@ function Settings({ onDone, onHelp }: { onDone: () => void; onHelp: () => void }
   );
 }
 
-function Home(props: { onEnter: (room: string) => void; onSettings: () => void; onHelp: () => void }) {
+function Home(props: { onEnter: (room: string) => void; onSettings: () => void; onHelp: (world?: string) => void }) {
   const { onEnter, onSettings } = props;
   const [code, setCode] = useState('');
   return (
@@ -180,7 +179,7 @@ interface Conn {
   error?: string;
 }
 
-function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; onHelp: () => void }) {
+function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; onHelp: (world?: string) => void }) {
   const pid = settings.playerId;
   const [conn, setConn] = useState<Conn>();
   const [snap, setSnap] = useState<ClientSnapshot>();
@@ -200,7 +199,7 @@ function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; on
       .ready()
       .then(async () => {
         if (settings.isHost(room)) {
-          c.host = new Host(db, bus, room, pid);
+          c.host = new Host(worldDb, bus, room, pid);
           await c.host.start();
         }
         player.start();
@@ -257,7 +256,7 @@ function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; on
   else if (!conn || !snap) body = <main class="screen narrow muted">Подключение…</main>;
   else if (snap.lobby?.started && snap.pub)
     body = (
-      <Game db={db} room={room} pid={pid} snap={snap} player={conn.player} host={conn.host} onLeave={onLeave} />
+      <Game db={worldDb(snap.pub.world ?? snap.lobby.world)} room={room} pid={pid} snap={snap} player={conn.player} host={conn.host} onLeave={onLeave} />
     );
   else
     body = (
@@ -288,7 +287,7 @@ function Lobby(props: {
   host?: Host;
   player: Player;
   onLeave: () => void;
-  onHelp: () => void;
+  onHelp: (world?: string) => void;
   refresh: () => void;
 }) {
   const { room, pid, snap, host } = props;
@@ -311,6 +310,8 @@ function Lobby(props: {
     );
 
   const inLobby = lobby.players.some((p) => p.id === pid);
+  const world = getWorld(lobby.world);
+  const db = worldDb(world.id);
   const manual = lobby.civMode === 'manual';
   const missing = host?.missingCivs() ?? [];
   const share = async () => {
@@ -365,6 +366,33 @@ function Lobby(props: {
       </ul>
       {!inLobby && lobby.players.length >= 5 && <p class="error">Комната заполнена.</p>}
 
+      <h2>Мир</h2>
+      {host && worlds.length > 1 ? (
+        <ul class="world-picker" role="radiogroup" aria-label="Мир">
+          {worlds.map((w) => (
+            <li key={w.id}>
+              <button
+                class={`civ-option ${w.id === world.id ? 'mine' : ''}`}
+                role="radio"
+                aria-checked={w.id === world.id}
+                onClick={() => {
+                  host.setWorld(w.id);
+                  props.refresh();
+                }}
+              >
+                <b>{w.name}</b>
+                {w.description && <div class="small muted">{w.description}</div>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p class="small">
+          <b>{world.name}</b>
+          {world.description && <span class="muted"> — {world.description}</span>}
+        </p>
+      )}
+
       <h2>Цивилизации</h2>
       {host ? (
         <div class="segmented" role="radiogroup" aria-label="Цивилизации">
@@ -386,7 +414,7 @@ function Lobby(props: {
       ) : (
         <p class="muted small">{manual ? 'Каждый выбирает цивилизацию сам.' : 'Цивилизации раздаются случайно при старте.'}</p>
       )}
-      {manual && inLobby && <CivPicker lobby={lobby} pid={pid} player={props.player} />}
+      {manual && inLobby && <CivPicker db={db} lobby={lobby} pid={pid} player={props.player} />}
 
       {host ? (
         <div class="stack">
@@ -420,13 +448,13 @@ function Lobby(props: {
       <button class="link" onClick={props.onLeave}>
         Выйти
       </button>
-      <HelpButton onHelp={props.onHelp} />
+      <HelpButton onHelp={() => props.onHelp(world.id)} />
     </main>
   );
 }
 
 /** Civilizations to pick from in the lobby (manual mode); bots get the ones left. */
-function CivPicker({ lobby, pid, player }: { lobby: LobbyMsg; pid: string; player: Player }) {
+function CivPicker({ db, lobby, pid, player }: { db: Db; lobby: LobbyMsg; pid: string; player: Player }) {
   const mine = lobby.players.find((p) => p.id === pid)?.civ;
   const owner = (id: string) => lobby.players.find((p) => p.civ === id && p.id !== pid);
   const free = [...db.civs.keys()].filter((id) => !owner(id) && id !== mine);
@@ -445,12 +473,13 @@ function CivPicker({ lobby, pid, player }: { lobby: LobbyMsg; pid: string; playe
                 onClick={() => player.pickCiv(c.id === mine ? null : c.id)}
               >
                 <div>
-                  <b>{c.name}</b> · старт: {RES_ICON[c.start]} {RES_NAME[c.start]}
+                  {c.img && <img class="civ-img" src={c.img} alt="" />}
+                  <b>{c.name}</b> · старт: <ResIcon db={db} id={c.start} /> {db.resources.get(c.start)?.name}
                   {by && <span class="muted"> · {by.name}</span>}
                   {c.id === mine && <span class="tag">ваша</span>}
                 </div>
                 <div class="small muted">
-                  {c.monument.name}: {stages.map((s) => effectsText(s.effects)).join(' → ')}
+                  {c.monument.name}: {joined(stages.map((s) => effectsText(db, s.effects)), ' → ')}
                 </div>
               </button>
             </li>

@@ -1,7 +1,6 @@
 import type { Db } from './db';
 import { leftOf, playerEffects, rightOf } from './payment';
 import type { Counter, GameState, ScoreBreakdown, School } from './types';
-import { SCHOOLS } from './types';
 
 export const SCIENCE_SET_BONUS = 7;
 export const COINS_PER_POINT = 3;
@@ -32,13 +31,15 @@ function triangle(k: number): number {
   return (k * (k + 1)) / 2;
 }
 
+/** Science points; `counts` has an entry for every school of the world. */
 export function scienceScore(counts: Record<School, number>, wild: number): number {
+  const schools = Object.keys(counts);
   const base = (c: Record<School, number>) =>
-    SCHOOLS.reduce((s, k) => s + triangle(c[k]), 0) + SCIENCE_SET_BONUS * Math.min(...SCHOOLS.map((k) => c[k]));
+    schools.reduce((s, k) => s + triangle(c[k]!), 0) + SCIENCE_SET_BONUS * Math.min(...schools.map((k) => c[k]!));
   if (wild === 0) return base(counts);
   let best = 0;
-  for (const k of SCHOOLS) {
-    best = Math.max(best, scienceScore({ ...counts, [k]: counts[k] + 1 }, wild - 1));
+  for (const k of schools) {
+    best = Math.max(best, scienceScore({ ...counts, [k]: counts[k]! + 1 }, wild - 1));
   }
   return best;
 }
@@ -49,7 +50,7 @@ export function scorePlayer(db: Db, state: GameState, i: number): ScoreBreakdown
   s.military = p.conflicts.reduce((a, b) => a + b, 0);
   s.coins = Math.floor(p.coins / COINS_PER_POINT);
 
-  const sci: Record<School, number> = { astronomy: 0, medicine: 0, writing: 0 };
+  const sci: Record<School, number> = Object.fromEntries(db.data.schools.map((k) => [k.id, 0]));
   let wild = 0;
   for (const { effect, source, cardType } of playerEffects(db, p)) {
     let pts = 0;
@@ -57,7 +58,7 @@ export function scorePlayer(db: Db, state: GameState, i: number): ScoreBreakdown
     else if (effect.kind === 'pointsPer') pts = effect.n * count(db, state, i, effect.count);
     else if (effect.kind === 'science') {
       if (effect.school === 'any') wild++;
-      else sci[effect.school]++;
+      else sci[effect.school] = (sci[effect.school] ?? 0) + 1;
     }
     if (!pts) continue;
     if (source === 'stage') s.monument += pts;

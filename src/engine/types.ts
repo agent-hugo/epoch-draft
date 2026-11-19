@@ -1,13 +1,9 @@
-export const RAW = ['wood', 'stone', 'clay', 'ore'] as const;
-export const GOODS = ['cloth', 'papyrus', 'glass'] as const;
-export type RawResource = (typeof RAW)[number];
-export type Goods = (typeof GOODS)[number];
-export type Resource = RawResource | Goods;
-export const RESOURCES: readonly Resource[] = [...RAW, ...GOODS];
+/** Resource id; the resources themselves are defined by the world. */
+export type Resource = string;
 export type ResourceMap = Partial<Record<Resource, number>>;
 
-export const SCHOOLS = ['astronomy', 'medicine', 'writing'] as const;
-export type School = (typeof SCHOOLS)[number];
+/** Science school id; the schools are defined by the world. */
+export type School = string;
 
 export const CARD_TYPES = ['raw', 'goods', 'culture', 'trade', 'military', 'science', 'dynasty'] as const;
 export type CardType = (typeof CARD_TYPES)[number];
@@ -55,6 +51,8 @@ export interface CardDef {
   effects: Effect[];
   /** Cards that become free to build once this card is in the city. */
   chainsTo?: string[];
+  /** Image URL. */
+  img?: string;
 }
 
 export interface StageDef {
@@ -65,13 +63,42 @@ export interface StageDef {
 export interface CivDef {
   id: string;
   name: string;
+  /** Image URL. */
+  img?: string;
   start: Resource;
   monument: { name: string; stages: StageDef[] };
 }
 
+export interface ResourceDef {
+  id: Resource;
+  name: string;
+  /** Text icon (emoji); also the fallback when `img` is set. */
+  icon: string;
+  /** Image URL, shown instead of the text icon. */
+  img?: string;
+  kind: 'raw' | 'goods';
+}
+
+export interface SchoolDef {
+  id: School;
+  name: string;
+  icon: string;
+  img?: string;
+}
+
+/**
+ * Everything the general rules are played with: resources, science schools,
+ * civilizations and cards. Comes from a world (see src/worlds).
+ */
 export interface GameData {
+  /** World id; stored in the game state. */
+  id?: string;
+  resources: ResourceDef[];
+  schools: SchoolDef[];
   cards: CardDef[];
   civs: CivDef[];
+  /** Names for bots. */
+  bots?: string[];
 }
 
 export interface Trade {
@@ -115,6 +142,8 @@ export interface LogEntry {
 
 export interface GameState {
   version: 1;
+  /** World the game is played in; missing in old saves (the default world). */
+  world?: string;
   rng: number;
   epoch: Epoch;
   /** 1..6 within the epoch. */

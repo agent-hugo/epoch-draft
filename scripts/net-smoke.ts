@@ -3,9 +3,8 @@
  * driven by bots through the network, and one host-side bot.
  * Usage: MQTT_URL=wss://... MQTT_TOKEN=... npm run net-smoke
  */
-import { gameData } from '../src/data';
 import { greedyBot } from '../src/engine/bots';
-import { Db } from '../src/engine/db';
+import { loadDb } from '../src/worlds/node';
 import { Player } from '../src/net/client';
 import { Host } from '../src/net/host';
 import { Bus } from '../src/net/mqtt';
@@ -19,7 +18,7 @@ if (!url || !token) {
   process.exit(2);
 }
 const cfg = { url, token };
-const db = new Db(gameData);
+const db = loadDb();
 const room = `TEST${randomRoomCode()}`;
 console.log('room', room);
 
@@ -32,7 +31,7 @@ function bus(pid: string) {
 
 const hostBus = bus('alice');
 await hostBus.ready();
-const host = new Host(db, hostBus, room, 'alice');
+const host = new Host(() => db, hostBus, room, 'alice');
 await host.start();
 
 const players = ['alice', 'bob', 'carol'].map((id) => {
