@@ -1,5 +1,5 @@
 import mqtt from 'mqtt';
-import type { MqttClient } from 'mqtt';
+import type { IPublishPacket, MqttClient } from 'mqtt';
 
 export interface BrokerConfig {
   url: string;
@@ -9,7 +9,21 @@ export interface BrokerConfig {
 /** Retained messages expire after 90 days, so abandoned rooms disappear from the broker. */
 export const RETAIN_EXPIRY_S = 90 * 24 * 60 * 60;
 
-export type Handler = (topic: string, payload: unknown) => void;
+/** What the broker says about a message besides its payload. */
+export interface MessageMeta {
+  /** Sent from the retained store on subscribe rather than live. */
+  retained: boolean;
+  /** When the broker received it (ms since epoch), if the broker says. */
+  time?: number;
+}
+
+export type Handler = (topic: string, payload: unknown, meta: MessageMeta) => void;
+
+function metaOf(packet: IPublishPacket): MessageMeta {
+  // flespi stamps every message with a `timestamp` user property, in seconds.
+  const ts = Number(packet.properties?.userProperties?.timestamp);
+  return { retained: packet.retain, time: ts > 0 ? ts * 1000 : undefined };
+}
 
 /** Thin JSON wrapper over mqtt.js with topic-filter handlers. */
 export class Bus {
@@ -41,18 +55,9 @@ export class Bus {
     this.client.on('connect', () => this.setOnline(true));
     this.client.on('close', () => this.setOnline(false));
     this.client.on('offline', () => this.setOnline(false));
-    this.client.on('message', (topic, buf) => {
-      if (buf.length === 0) {
-        this.dispatch(topic, null);
-        return;
-      }
-      let payload: unknown;
-      try {
-        payload = JSON.parse(buf.toString());
-      } catch {
-        return;
-      }
-      this.dispatch(topic, payload);
+    this.client.on('message', (topic, buf, packet) => {
+      const payload = parse(buf);
+      if (payload !== undefined) this.dispatch(topic, payload, metaOf(packet));
     });
   }
 
@@ -86,13 +91,35 @@ export class Bus {
     });
   }
 
-  private dispatch(topic: string, payload: unknown) {
-    for (const h of this.handlers) if (matches(h.filter, topic)) h.fn(topic, payload);
+  private dispatch(topic: string, payload: unknown, meta: MessageMeta) {
+    for (const h of this.handlers) if (matches(h.filter, topic)) h.fn(topic, payload, meta);
   }
 
-  subscribe(filter: string, fn: Handler): void {
+  /**
+   * Resolves on the SUBACK; the broker sends the retained messages before
+   * it, so by then the handler has seen all of them.
+   */
+  subscribe(filter: string, fn: Handler): Promise<void> {
     this.handlers.push({ filter, fn });
-    this.client.subscribe(filter, { qos: 1 });
+    const done = this.client.subscribeAsync(filter, { qos: 1 }).then(() => undefined);
+    done.catch(() => {}); // most callers do not wait
+    return done;
+  }
+
+  /** Topics of the retained messages under a filter, without staying subscribed. */
+  async retainedTopics(filter: string): Promise<string[]> {
+    const found = new Set<string>();
+    const onMessage = (topic: string, buf: Buffer, packet: IPublishPacket) => {
+      if (packet.retain && buf.length > 0 && matches(filter, topic)) found.add(topic);
+    };
+    this.client.on('message', onMessage);
+    try {
+      await this.client.subscribeAsync(filter, { qos: 1 });
+    } finally {
+      this.client.off('message', onMessage);
+    }
+    await this.client.unsubscribeAsync(filter);
+    return [...found];
   }
 
   publish(topic: string, payload: unknown, retain = false): Promise<void> {
@@ -105,6 +132,16 @@ export class Bus {
 
   end(): Promise<void> {
     return new Promise((resolve) => this.client.end(false, {}, () => resolve()));
+  }
+}
+
+/** JSON payload; null for an empty (cleared) message, undefined if malformed. */
+function parse(buf: Buffer): unknown {
+  if (buf.length === 0) return null;
+  try {
+    return JSON.parse(buf.toString());
+  } catch {
+    return undefined;
   }
 }
 

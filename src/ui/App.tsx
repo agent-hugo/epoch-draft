@@ -8,6 +8,7 @@ import { getWorld, worldDb, worlds } from '../worlds';
 import { effectsText, joined, ResIcon } from './format';
 import { Game } from './Game';
 import { Reference } from './Reference';
+import { RoomList } from './Rooms';
 import { settings } from './storage';
 
 function readHash(): URLSearchParams {
@@ -195,6 +196,7 @@ function Home(props: { onEnter: (room: string) => void; onSettings: () => void; 
         Настройки
       </button>
       <HelpButton onHelp={props.onHelp} />
+      <RoomList onEnter={onEnter} />
     </main>
   );
 }

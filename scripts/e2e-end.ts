@@ -1,6 +1,6 @@
 /**
- * Help screen, settings tab, replacing a player with a bot and "end game for
- * everyone", through the UI: three phones against the built app served by
+ * Help screen, settings tab, replacing a player with a bot, "end game for
+ * everyone" and the room list on the home screen, through the UI: three phones against the built app served by
  * `vite preview`.
  * Usage: MQTT_TOKEN=... npm run e2e:end -- [screenshot dir]
  */
@@ -54,7 +54,7 @@ async function join(name: string, room: string): Promise<Page> {
   await p.getByLabel('Ваше имя').fill(name);
   await p.getByRole('button', { name: 'Сохранить' }).click();
   await p.getByPlaceholder('Код комнаты').fill(room);
-  await p.getByRole('button', { name: 'Войти' }).click();
+  await p.getByRole('button', { name: 'Войти', exact: true }).click();
   return p;
 }
 
@@ -222,6 +222,33 @@ try {
 
   await host.getByRole('button', { name: 'В меню' }).click();
   await host.getByRole('button', { name: 'Создать игру' }).waitFor();
+
+  // The home screen lists the rooms on the broker; an ended room is not there.
+  await host.locator('.room-list, .rooms :text("Комнат нет.")').first().waitFor();
+  check(!(await host.getByRole('button', { name: `Войти в комнату ${room}` }).isVisible()), 'ended room must not be listed');
+  await host.getByRole('button', { name: 'Создать игру' }).click();
+  await host.locator('.room-code').waitFor();
+  const room2 = (await host.locator('.room-code').textContent())!.trim();
+  await host.locator('.players li', { hasText: 'Мама' }).waitFor();
+  await host.getByRole('button', { name: 'Выйти' }).click();
+  const item = host.locator('.room-list li', { hasText: room2 });
+  await item.getByText('вы хост').waitFor({ timeout: 10000 });
+  await shot(host, 'e5-rooms');
+  // Enter from the list, back, then delete it.
+  await host.getByRole('button', { name: `Войти в комнату ${room2}` }).click();
+  await host.locator('.room-code', { hasText: room2 }).waitFor();
+  await host.locator('.players li', { hasText: 'Мама' }).waitFor();
+  await host.getByRole('button', { name: 'Выйти' }).click();
+  await host.getByRole('button', { name: `Удалить комнату ${room2}` }).click();
+  await confirm(host, false);
+  check(await item.isVisible(), 'cancel must keep the room');
+  await host.getByRole('button', { name: `Удалить комнату ${room2}` }).click();
+  await confirm(host, 'Удалить');
+  await item.waitFor({ state: 'detached', timeout: 10000 });
+  // Opening the deleted room shows it ended.
+  await host.goto(`${base}#room=${room2}`);
+  await host.getByRole('heading', { name: 'Игра завершена' }).waitFor({ timeout: 10000 });
+  check(await host.getByText('Мама завершил(а) игру').isVisible(), 'deleted room must say who ended it');
 
   if (errors.length) throw new Error(`browser errors:\n${errors.join('\n')}`);
   console.log('ok');

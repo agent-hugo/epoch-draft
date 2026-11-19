@@ -26,6 +26,17 @@ export function replacedByBot(s: ClientSnapshot, pid: string): boolean {
   return !!s.lobby?.players.some((p) => p.id === pid && p.bot);
 }
 
+/**
+ * Ends a room for everyone: marks it closed (the host stops on that and
+ * players see who ended it) and removes every other retained message of the
+ * room.
+ */
+export async function deleteRoom(bus: Bus, room: string, by: string): Promise<void> {
+  await bus.publish(topics.closed(room), { by } satisfies ClosedMsg, true);
+  const left = await bus.retainedTopics(`${topics.room(room)}/#`);
+  await Promise.all(left.filter((t) => t !== topics.closed(room)).map((t) => bus.publish(t, null, true)));
+}
+
 /** One player's connection to a room. */
 export class Player {
   snapshot: ClientSnapshot = { presence: {}, connected: false };
@@ -94,17 +105,9 @@ export class Player {
     void this.bus.publish(topics.action(this.room, this.id), msg, true);
   }
 
-  /**
-   * Ends the game for everyone: marks the room closed (the host stops on
-   * that) and removes every retained message of the room.
-   */
-  async endGame(): Promise<void> {
-    const ids = new Set([this.id, ...(this.snapshot.lobby?.players.map((p) => p.id) ?? [])]);
-    const r = this.room;
-    await this.bus.publish(topics.closed(r), { by: this.name } satisfies ClosedMsg, true);
-    const clear = [topics.lobby(r), topics.publicState(r), topics.hostState(r)];
-    for (const id of ids) clear.push(topics.join(r, id), topics.action(r, id), topics.hand(r, id), topics.presence(r, id));
-    await Promise.all(clear.map((t) => this.bus.publish(t, null, true)));
+  /** Ends the game for everyone; see {@link deleteRoom}. */
+  endGame(): Promise<void> {
+    return deleteRoom(this.bus, this.room, this.name);
   }
 
   /** Removes this player's own retained messages once it is out of the room. */

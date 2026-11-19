@@ -670,3 +670,32 @@ a {
 .help-worlds {
   margin-bottom: 8px;
 }
+
+/* rooms on the home screen */
+.rooms h2 {
+  margin-bottom: 4px;
+}
+.room-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.room-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.room-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.room-list-code {
+  letter-spacing: 0.1em;
+}
+.room-actions button {
+  flex: 1;
+}

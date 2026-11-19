@@ -47,7 +47,7 @@ try {
 
   const guest = await open('Петя');
   await guest.getByPlaceholder('Код комнаты').fill(room);
-  await guest.getByRole('button', { name: 'Войти' }).click();
+  await guest.getByRole('button', { name: 'Войти', exact: true }).click();
   await host.locator('.players li', { hasText: 'Петя' }).waitFor();
   await host.getByRole('button', { name: 'Добавить бота' }).click();
   await host.locator('.players li', { hasText: 'Бот' }).waitFor();

@@ -8,6 +8,7 @@ import type { CardDef, Choice, GameState, LogEntry, PlayerState, ScoreBreakdown 
 import type { ClientSnapshot, Player } from '../net/client';
 import type { Host } from '../net/host';
 import { playerView } from '../net/protocol';
+import { ConfirmDialog, type Ask } from './dialog';
 import { Reference } from './Reference';
 import { settings } from './storage';
 import { costText, effectsText, EPOCH_NAME, joined, resChoice, resList, TYPE_NAME, TYPE_ORDER } from './format';
@@ -244,37 +245,6 @@ function TurnSummary({ db, state, pid, onClose }: { db: Db; state: GameState; pi
         <div class="row end">
           <button class="primary" autoFocus onClick={onClose}>
             Дальше
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-interface Ask {
-  text: ComponentChildren;
-  ok: string;
-  danger?: boolean;
-  run: () => void;
-}
-
-/** A confirmation dialog over the whole screen. */
-function ConfirmDialog({ ask, onClose }: { ask: Ask; onClose: () => void }) {
-  return (
-    <div class="modal-back" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div class="modal" role="dialog" aria-modal="true">
-        <div class="modal-body">{ask.text}</div>
-        <div class="row end">
-          <button onClick={onClose}>Отмена</button>
-          <button
-            class={ask.danger ? 'danger' : 'primary'}
-            autoFocus
-            onClick={() => {
-              onClose();
-              ask.run();
-            }}
-          >
-            {ask.ok}
           </button>
         </div>
       </div>
