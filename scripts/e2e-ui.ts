@@ -69,6 +69,22 @@ try {
   for (const p of pages) await p.locator('.cards .card').first().waitFor({ timeout: 15000 });
   await shot(guest, '2-hand');
 
+  // A move can be withdrawn while others choose: the chosen card offers a cancel, not its actions.
+  {
+    const card = host.locator('.cards .card').first();
+    await card.locator('.card-head').click();
+    await card.getByRole('button', { name: /^Продать/ }).click();
+    await host.getByRole('dialog').getByRole('button', { name: 'Подтвердить' }).click();
+    await host.locator('.banner.ok').waitFor();
+    await host.locator('.cards .card.chosen .card-head').click();
+    const chosen = host.locator('.cards .card.chosen');
+    if (await chosen.getByRole('button', { name: /^(Построить|Продать|Стадия)/ }).count())
+      throw new Error('the chosen card still offers its actions');
+    await chosen.getByRole('button', { name: 'Отменить выбор' }).click();
+    await host.locator('.banner.ok').waitFor({ state: 'hidden' });
+    if (await host.locator('.cards .card.chosen').count()) throw new Error('the withdrawn card is still marked');
+  }
+
   let moves = 0;
   const done = (p: Page) => p.getByRole('heading', { name: /Победа|Победил/ }).isVisible();
   while (!(await done(host)) || !(await done(guest))) {

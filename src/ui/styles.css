@@ -699,3 +699,7 @@ a {
 .room-actions button {
   flex: 1;
 }
+.banner-action {
+  display: block;
+  margin-top: 6px;
+}

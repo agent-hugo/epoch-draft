@@ -61,7 +61,8 @@ export interface ClosedMsg {
 export interface ActionMsg {
   epoch: number;
   turn: number;
-  choice: Choice;
+  /** The move; null withdraws the move made earlier this turn. */
+  choice: Choice | null;
 }
 
 export interface HandMsg {

@@ -98,7 +98,8 @@ export class Player {
     void this.bus.publish(topics.join(this.room, this.id), msg, true);
   }
 
-  send(choice: Choice): void {
+  /** Sends this turn's move; null withdraws it while others are still choosing. */
+  send(choice: Choice | null): void {
     const pub = this.snapshot.pub;
     if (!pub) return;
     const msg: ActionMsg = { epoch: pub.epoch, turn: pub.turn, choice };

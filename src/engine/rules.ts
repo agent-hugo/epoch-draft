@@ -161,6 +161,15 @@ export function choose(db: Db, state: GameState, playerId: string, choice: Choic
   return next;
 }
 
+/** Withdraws a player's choice for the current turn, while the turn is still open. */
+export function unchoose(state: GameState, playerId: string): GameState {
+  playerIndex(state, playerId);
+  if (state.phase !== 'play' || !state.pending[playerId]) return state;
+  const next = structuredClone(state);
+  delete next.pending[playerId];
+  return next;
+}
+
 export function waitingFor(state: GameState): string[] {
   if (state.phase !== 'play') return [];
   return state.players.filter((p) => !state.pending[p.id]).map((p) => p.id);

@@ -7,6 +7,7 @@ export { scorePlayer, scoreGame, ranking, scienceScore, military } from './scori
 export {
   createGame,
   choose,
+  unchoose,
   handOptions,
   validateChoice,
   waitingFor,

@@ -11,6 +11,7 @@ import {
   RuleError,
   scienceScore,
   scoreGame,
+  unchoose,
   waitingFor,
   type GameState,
 } from '../src/engine';
@@ -91,6 +92,17 @@ describe('turns', () => {
     expect(s.players.every((p) => p.coins === 6)).toBe(true);
     // Epoch I passes left: p0's hand goes to p2 (left of 0).
     expect(s.players[2]!.hand).toEqual(hands[0]!.slice(1));
+  });
+
+  it('lets a choice be withdrawn until the turn resolves', () => {
+    let s = setup(3);
+    s = choose(db, s, 'p0', { action: 'sell', card: s.players[0]!.hand[0]! });
+    s = unchoose(s, 'p0');
+    expect(waitingFor(s)).toEqual(['p0', 'p1', 'p2']);
+    expect(unchoose(s, 'p0')).toBe(s);
+    s = choose(db, s, 'p1', { action: 'sell', card: s.players[1]!.hand[0]! });
+    s = choose(db, s, 'p2', { action: 'sell', card: s.players[2]!.hand[0]! });
+    expect(s.turn).toBe(1);
   });
 
   it('rejects illegal choices', () => {

@@ -374,12 +374,13 @@ function HandTab(props: {
   ready: boolean;
   chosen?: Choice;
   error?: string;
-  onChoose: (c: Choice) => void;
+  onChoose: (c: Choice | null) => void;
   open?: string;
   setOpen: (card?: string) => void;
 }) {
   const { db, view, i, chosen, open, setOpen } = props;
-  const [sent, setSent] = useState<Choice>();
+  // What was last sent this turn: a move, or null for a withdrawn one.
+  const [sent, setSent] = useState<Choice | null>();
   const [ask, setAsk] = useState<Ask>();
   const key = `${view.epoch}-${view.turn}`;
   useEffect(() => {
@@ -392,17 +393,20 @@ function HandTab(props: {
   const options = handOptions(db, view, i);
   const civ = db.civ(me.civ);
   const stageCost = nextStageCost(db, me);
-  const choose = (c: Choice) => {
+  const choose = (c: Choice | null) => {
     setSent(c);
     props.onChoose(c);
   };
-  const pendingSend = sent && JSON.stringify(sent) !== JSON.stringify(chosen);
+  const pendingSend = sent !== undefined && JSON.stringify(sent) !== JSON.stringify(chosen ?? null);
 
   return (
     <div>
       {chosen && (
         <div class="banner ok">
-          {choiceLabel(db, chosen)}. Пока ходят остальные, выбор можно изменить.
+          {choiceLabel(db, chosen)}. Пока ходят остальные, выбор можно изменить или отменить.
+          <button class="banner-action" onClick={() => choose(null)}>
+            Отменить выбор
+          </button>
         </div>
       )}
       {pendingSend && !props.error && <div class="banner">Отправляем…</div>}
@@ -429,7 +433,20 @@ function HandTab(props: {
                 <CardFace db={db} card={card} chain={o.chain} affordable={o.build.length > 0} />
               </button>
               {open === o.card && card.img && <img class="card-img" src={card.img} alt="" />}
-              {open === o.card && (
+              {open === o.card && isChosen && (
+                <div class="actions">
+                  <div class="small">{choiceLabel(db, chosen)}.</div>
+                  <button
+                    onClick={() => {
+                      choose(null);
+                      setOpen(undefined);
+                    }}
+                  >
+                    Отменить выбор
+                  </button>
+                </div>
+              )}
+              {open === o.card && !isChosen && (
                 <CardActions
                   db={db}
                   me={me}

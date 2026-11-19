@@ -1,7 +1,7 @@
 import { greedyBot, type Bot } from '../engine/bots';
 import type { Db } from '../engine/db';
 import { MAX_PLAYERS, MIN_PLAYERS } from '../engine/db';
-import { choose, createGame, playerIndex, RuleError, waitingFor } from '../engine/rules';
+import { choose, createGame, playerIndex, RuleError, unchoose, waitingFor } from '../engine/rules';
 import type { GameState } from '../engine/types';
 import type { Bus } from './mqtt';
 import {
@@ -195,7 +195,7 @@ export class Host {
     const prev = g.pending[pid];
     if (prev && JSON.stringify(prev) === JSON.stringify(msg.choice)) return;
     try {
-      this.game = choose(this.db, g, pid, msg.choice);
+      this.game = msg.choice ? choose(this.db, g, pid, msg.choice) : unchoose(g, pid);
       this.errors.delete(pid);
     } catch (e) {
       if (!(e instanceof RuleError)) throw e;
