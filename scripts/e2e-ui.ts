@@ -166,6 +166,13 @@ try {
   if (!endChecked) throw new Error('the host was never asked to end the turn');
   await guest.getByRole('button', { name: 'Город' }).isVisible().catch(() => false);
   await shot(host, '5-final');
+  // Every move of the game can be reviewed on the final screen, with all cards shown.
+  await guest.getByRole('button', { name: /^Все ходы партии/ }).click();
+  const logItems = guest.locator('.game-log li');
+  if ((await logItems.count()) !== 54) throw new Error(`expected 54 moves in the game log, got ${await logItems.count()}`);
+  if (await guest.locator('.game-log li', { hasText: 'продал(а) карту' }).count()) throw new Error('the game log hides a sold card');
+  await guest.locator('.game-log h3').nth(10).scrollIntoViewIfNeeded();
+  await shot(guest, '6-log');
   const table = await host.locator('table.scores').innerText();
   console.log(table);
   if (moves !== 36) throw new Error(`expected 36 moves by two humans, got ${moves}`);

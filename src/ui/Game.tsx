@@ -182,12 +182,15 @@ function lastTurnLog(log: LogEntry[]): LogEntry[] {
 
 /**
  * What a player did, as everybody sees it. As in the board game, the card
- * spent on a monument stage or sold stays hidden from the other players.
+ * spent on a monument stage or sold stays hidden from the other players,
+ * unless `reveal` (the review after the game) shows every card.
  */
-function ActionText({ db, state, e, pid }: { db: Db; state: GameState; e: LogEntry; pid: string }) {
+function ActionText(props: { db: Db; state: GameState; e: LogEntry; pid: string; reveal?: boolean }) {
+  const { db, state, e, pid, reveal } = props;
   const n = state.players.length;
   const k = state.players.findIndex((p) => p.id === e.player);
   const mine = e.player === pid;
+  const shown = mine || reveal;
   const card = db.card(e.card);
   const paid = [];
   if (e.left) paid.push(`${e.left}🪙 ◀ ${state.players[leftOf(n, k)]!.name}`);
@@ -212,7 +215,7 @@ function ActionText({ db, state, e, pid }: { db: Db; state: GameState; e: LogEnt
     const stage = db.civ(state.players[k]!.civ).monument.stages[stageNo - 1];
     return (
       <>
-        {mine ? 'возвели' : 'возвёл(а)'} 🏛️ стадию {stageNo} сооружения{mine && ` картой «${card.name}»`}
+        {mine ? 'возвели' : 'возвёл(а)'} 🏛️ стадию {stageNo} сооружения{shown && ` картой «${card.name}»`}
         {pay}
         {stage && <div class="small muted">{effectsText(db, stage.effects)}</div>}
       </>
@@ -220,7 +223,7 @@ function ActionText({ db, state, e, pid }: { db: Db; state: GameState; e: LogEnt
   }
   return (
     <>
-      {mine ? `продали «${card.name}»` : 'продал(а) карту'} за {SELL_COINS}🪙
+      {mine ? 'продали' : 'продал(а)'} {shown ? `«${card.name}»` : 'карту'} за {SELL_COINS}🪙
     </>
   );
 }
@@ -751,7 +754,37 @@ function LastAction({ db, state, k, pid }: { db: Db; state: GameState; k: number
   );
 }
 
+/** Every move of the game, turn by turn, with all cards shown. */
+function GameLog({ db, state, pid }: { db: Db; state: GameState; pid: string }) {
+  const turns: LogEntry[][] = [];
+  for (const e of state.log) {
+    const cur = turns[turns.length - 1];
+    if (cur && cur[0]!.epoch === e.epoch && cur[0]!.turn === e.turn) cur.push(e);
+    else turns.push([e]);
+  }
+  return (
+    <section class="game-log">
+      {turns.map((t) => (
+        <div key={`${t[0]!.epoch}-${t[0]!.turn}`}>
+          <h3>
+            Эпоха {EPOCH_NAME[t[0]!.epoch]} · ход {t[0]!.turn}
+          </h3>
+          <ul class="summary-list">
+            {t.map((e) => (
+              <li key={e.player}>
+                <b>{e.player === pid ? 'Вы' : state.players.find((p) => p.id === e.player)?.name}</b>{' '}
+                <ActionText db={db} state={state} e={e} pid={pid} reveal />
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function Final({ db, state, me, onLeave }: { db: Db; state: GameState; me: number; onLeave: () => void }) {
+  const [showLog, setShowLog] = useState(false);
   const scores = scoreGame(db, state);
   const order = ranking(db, state);
   const rows: [keyof ScoreBreakdown, string][] = [
@@ -792,6 +825,8 @@ function Final({ db, state, me, onLeave }: { db: Db; state: GameState; me: numbe
           </tbody>
         </table>
       </div>
+      <button onClick={() => setShowLog(!showLog)}>{showLog ? 'Скрыть ходы' : `Все ходы партии (${state.log.length})`}</button>
+      {showLog && <GameLog db={db} state={state} pid={state.players[me]?.id ?? ''} />}
       <button class="primary" onClick={onLeave}>
         В меню
       </button>

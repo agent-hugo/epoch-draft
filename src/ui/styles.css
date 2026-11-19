@@ -722,3 +722,7 @@ a {
   display: block;
   margin-top: 6px;
 }
+.game-log h3 {
+  margin: 12px 0 6px;
+  font-size: 1rem;
+}
