@@ -28,16 +28,25 @@ export interface LobbyPlayer {
   id: string;
   name: string;
   bot?: boolean;
+  /** Civilization picked in the lobby (manual mode only). */
+  civ?: string;
 }
+
+/** How civilizations are assigned: at random or picked by players in the lobby. */
+export type CivMode = 'random' | 'manual';
 
 export interface LobbyMsg {
   host: string;
   players: LobbyPlayer[];
   started: boolean;
+  /** Missing means random. */
+  civMode?: CivMode;
 }
 
 export interface JoinMsg {
   name: string;
+  /** Civilization the player wants (manual mode); null drops the pick, missing keeps it. */
+  civ?: string | null;
 }
 
 export interface ClosedMsg {

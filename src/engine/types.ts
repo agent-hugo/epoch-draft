@@ -109,6 +109,8 @@ export interface LogEntry {
   /** Coins paid to the left / right neighbour for resources. */
   left?: number;
   right?: number;
+  /** Built for free thanks to a chain. */
+  chain?: boolean;
 }
 
 export interface GameState {

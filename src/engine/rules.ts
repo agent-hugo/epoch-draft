@@ -198,6 +198,7 @@ function resolveTurn(db: Db, state: GameState): void {
     const entry: LogEntry = { epoch: state.epoch, turn: state.turn, player: p.id, action: choice.action, card: choice.card, paid };
     if (toLeft) entry.left = toLeft;
     if (toRight) entry.right = toRight;
+    if (choice.action === 'build' && isChainFree(db, p, choice.card)) entry.chain = true;
     state.log.push(entry);
   });
 

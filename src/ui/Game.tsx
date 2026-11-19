@@ -57,6 +57,11 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
   const lastKey = last ? `${last.epoch}-${last.turn}` : '';
   const seenTurn = useRef(lastKey);
   const [summary, setSummary] = useState(false);
+  // The expanded card of the hand survives switching tabs, but not the turn.
+  const [openCard, setOpenCard] = useState<{ key: string; card?: string }>({ key: '' });
+  const turnKey = `${pub.epoch}-${pub.turn}`;
+  const open = openCard.key === turnKey ? openCard.card : undefined;
+  const setOpen = (card?: string) => setOpenCard({ key: turnKey, card });
   useEffect(() => {
     if (lastKey === seenTurn.current) return;
     seenTurn.current = lastKey;
@@ -95,6 +100,8 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
             chosen={handFresh ? snap.hand!.chosen : undefined}
             error={handFresh ? snap.hand!.error : undefined}
             onChoose={(c) => player.send(c)}
+            open={open}
+            setOpen={setOpen}
           />
         )}
         {tab === 'city' && <CityView db={db} state={view} i={i} />}
@@ -151,6 +158,7 @@ function ActionText({ db, state, e, pid }: { db: Db; state: GameState; e: LogEnt
     return (
       <>
         {mine ? 'построили' : 'построил(а)'} <b class={`chip t-${card.type}`}>{card.name}</b>
+        {e.chain && <span class="muted"> · даром по цепочке</span>}
         {pay}
         <div class="small muted">{effectsText(card.effects)}</div>
       </>
@@ -397,14 +405,14 @@ function HandTab(props: {
   chosen?: Choice;
   error?: string;
   onChoose: (c: Choice) => void;
+  open?: string;
+  setOpen: (card?: string) => void;
 }) {
-  const { db, view, i, chosen } = props;
-  const [open, setOpen] = useState<string>();
+  const { db, view, i, chosen, open, setOpen } = props;
   const [sent, setSent] = useState<Choice>();
   const [ask, setAsk] = useState<Ask>();
   const key = `${view.epoch}-${view.turn}`;
   useEffect(() => {
-    setOpen(undefined);
     setSent(undefined);
     setAsk(undefined);
   }, [key]);

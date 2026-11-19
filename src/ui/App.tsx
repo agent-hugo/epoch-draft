@@ -4,7 +4,8 @@ import { Db } from '../engine/db';
 import { Player, replacedByBot, type ClientSnapshot } from '../net/client';
 import { Host } from '../net/host';
 import { Bus } from '../net/mqtt';
-import { normalizeRoom, randomRoomCode, topics } from '../net/protocol';
+import { normalizeRoom, randomRoomCode, topics, type LobbyMsg } from '../net/protocol';
+import { effectsText, RES_ICON, RES_NAME } from './format';
 import { Game } from './Game';
 import { Reference } from './Reference';
 import { settings } from './storage';
@@ -265,6 +266,7 @@ function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; on
         pid={pid}
         snap={snap}
         host={conn.host}
+        player={conn.player}
         onLeave={onLeave}
         onHelp={onHelp}
         refresh={() => force((x) => x + 1)}
@@ -284,6 +286,7 @@ function Lobby(props: {
   pid: string;
   snap: ClientSnapshot;
   host?: Host;
+  player: Player;
   onLeave: () => void;
   onHelp: () => void;
   refresh: () => void;
@@ -308,6 +311,8 @@ function Lobby(props: {
     );
 
   const inLobby = lobby.players.some((p) => p.id === pid);
+  const manual = lobby.civMode === 'manual';
+  const missing = host?.missingCivs() ?? [];
   const share = async () => {
     try {
       if (navigator.share) await navigator.share({ title: 'Epoch Draft', url: link });
@@ -340,6 +345,7 @@ function Lobby(props: {
           <li key={p.id}>
             <span class={`dot ${p.bot || snap.presence[p.id] ? 'on' : ''}`} />
             {p.name}
+            {manual && <span class="muted small">{p.civ ? db.civ(p.civ).name : p.bot ? 'случайно' : 'выбирает…'}</span>}
             {p.id === lobby.host && <span class="tag">хост</span>}
             {p.id === pid && <span class="tag">вы</span>}
             {host && p.id !== lobby.host && (
@@ -358,6 +364,29 @@ function Lobby(props: {
         ))}
       </ul>
       {!inLobby && lobby.players.length >= 5 && <p class="error">Комната заполнена.</p>}
+
+      <h2>Цивилизации</h2>
+      {host ? (
+        <div class="segmented" role="radiogroup" aria-label="Цивилизации">
+          {(['random', 'manual'] as const).map((m) => (
+            <button
+              key={m}
+              role="radio"
+              aria-checked={(lobby.civMode ?? 'random') === m}
+              class={(lobby.civMode ?? 'random') === m ? 'active' : ''}
+              onClick={() => {
+                host.setCivMode(m);
+                props.refresh();
+              }}
+            >
+              {m === 'random' ? '🎲 Случайно' : '✋ Выбор игроков'}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p class="muted small">{manual ? 'Каждый выбирает цивилизацию сам.' : 'Цивилизации раздаются случайно при старте.'}</p>
+      )}
+      {manual && inLobby && <CivPicker lobby={lobby} pid={pid} player={props.player} />}
 
       {host ? (
         <div class="stack">
@@ -381,6 +410,9 @@ function Lobby(props: {
             Начать игру
           </button>
           {lobby.players.length < 3 && <p class="muted small">Нужно от 3 до 5 игроков.</p>}
+          {missing.length > 0 && (
+            <p class="muted small">Ещё не выбрали цивилизацию: {missing.map((p) => p.name).join(', ')}.</p>
+          )}
         </div>
       ) : (
         <p class="muted">Ждём, пока хост начнёт игру…</p>
@@ -390,5 +422,48 @@ function Lobby(props: {
       </button>
       <HelpButton onHelp={props.onHelp} />
     </main>
+  );
+}
+
+/** Civilizations to pick from in the lobby (manual mode); bots get the ones left. */
+function CivPicker({ lobby, pid, player }: { lobby: LobbyMsg; pid: string; player: Player }) {
+  const mine = lobby.players.find((p) => p.id === pid)?.civ;
+  const owner = (id: string) => lobby.players.find((p) => p.civ === id && p.id !== pid);
+  const free = [...db.civs.keys()].filter((id) => !owner(id) && id !== mine);
+  return (
+    <div class="civ-picker">
+      <ul>
+        {[...db.civs.values()].map((c) => {
+          const by = owner(c.id);
+          const stages = c.monument.stages;
+          return (
+            <li key={c.id}>
+              <button
+                class={`civ-option ${c.id === mine ? 'mine' : ''}`}
+                disabled={!!by}
+                aria-pressed={c.id === mine}
+                onClick={() => player.pickCiv(c.id === mine ? null : c.id)}
+              >
+                <div>
+                  <b>{c.name}</b> · старт: {RES_ICON[c.start]} {RES_NAME[c.start]}
+                  {by && <span class="muted"> · {by.name}</span>}
+                  {c.id === mine && <span class="tag">ваша</span>}
+                </div>
+                <div class="small muted">
+                  {c.monument.name}: {stages.map((s) => effectsText(s.effects)).join(' → ')}
+                </div>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <button
+        class="link"
+        disabled={!free.length}
+        onClick={() => player.pickCiv(free[Math.floor(Math.random() * free.length)]!)}
+      >
+        🎲 Выбрать случайную
+      </button>
+    </div>
   );
 }

@@ -13,6 +13,8 @@ import {
   type HandMsg,
   type HostSnapshot,
   type JoinMsg,
+  type LobbyPlayer,
+  type CivMode,
   type LobbyMsg,
 } from './protocol';
 
@@ -74,19 +76,44 @@ export class Host {
     if (this.closed || !msg || typeof msg.name !== 'string') return;
     const name = msg.name.trim().slice(0, 24) || 'Игрок';
     const existing = this.lobby.players.find((p) => p.id === pid);
+    let player = existing;
     if (existing) {
       // A player replaced by a bot is out of the game for good.
-      if (existing.bot || existing.name === name) return;
-      existing.name = name;
-      if (this.game) {
-        const gp = this.game.players.find((p) => p.id === pid);
-        if (gp) gp.name = name;
+      if (existing.bot) return;
+      if (existing.name !== name) {
+        existing.name = name;
+        if (this.game) {
+          const gp = this.game.players.find((p) => p.id === pid);
+          if (gp) gp.name = name;
+        }
       }
     } else {
       if (this.lobby.started || this.lobby.players.length >= MAX_PLAYERS) return;
-      this.lobby.players.push({ id: pid, name });
+      player = { id: pid, name };
+      this.lobby.players.push(player);
     }
+    if (!this.lobby.started) this.pickCiv(player!, msg.civ);
     void this.publishAll();
+  }
+
+  /** Takes a civilization for a lobby player unless someone else already has it. */
+  private pickCiv(p: LobbyPlayer, civ: unknown) {
+    if (civ === undefined) return;
+    if (civ === null) delete p.civ;
+    else if (typeof civ === 'string' && this.db.civs.has(civ) && !this.lobby.players.some((o) => o !== p && o.civ === civ))
+      p.civ = civ;
+  }
+
+  setCivMode(mode: CivMode): void {
+    if (this.lobby.started) return;
+    this.lobby.civMode = mode;
+    void this.publishAll();
+  }
+
+  /** Players who still have to pick a civilization before the game can start. */
+  missingCivs(): LobbyPlayer[] {
+    if (this.lobby.civMode !== 'manual') return [];
+    return this.lobby.players.filter((p) => !p.bot && !p.civ);
   }
 
   addBot(): void {
@@ -128,7 +155,7 @@ export class Host {
 
   canStart(): boolean {
     const n = this.lobby.players.length;
-    return !this.lobby.started && n >= MIN_PLAYERS && n <= MAX_PLAYERS;
+    return !this.lobby.started && n >= MIN_PLAYERS && n <= MAX_PLAYERS && this.missingCivs().length === 0;
   }
 
   startGame(): void {
@@ -136,7 +163,10 @@ export class Host {
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
     // Random seating.
     const seats = this.lobby.players.slice().sort(() => Math.random() - 0.5);
-    this.game = createGame(this.db, { seed, players: seats.map((p) => ({ id: p.id, name: p.name })) });
+    // Bots and (in random mode) everybody get a random civilization.
+    const manual = this.lobby.civMode === 'manual';
+    const players = seats.map((p) => ({ id: p.id, name: p.name, civ: manual ? p.civ : undefined }));
+    this.game = createGame(this.db, { seed, players });
     this.lobby.started = true;
     this.runBots();
     void this.publishAll();

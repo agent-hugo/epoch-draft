@@ -104,6 +104,12 @@ describe('turns', () => {
     const opt = handOptions(db, s, 0).find((o) => o.card === '2-temple')!;
     expect(opt.chain).toBe(true);
     expect(opt.build[0]!.total).toBe(0);
+
+    let t = choose(db, s, 'p0', { action: 'build', card: '2-temple', trade: opt.build[0]!.trade });
+    for (const q of t.players.slice(1)) t = choose(db, t, q.id, { action: 'sell', card: q.hand[0]! });
+    const entry = t.log.find((e) => e.player === 'p0')!;
+    expect(entry).toMatchObject({ action: 'build', card: '2-temple', paid: 0, chain: true });
+    expect(t.log.filter((e) => e.chain)).toHaveLength(1);
   });
 });
 

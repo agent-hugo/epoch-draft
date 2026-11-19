@@ -102,11 +102,32 @@ try {
   // Help from the lobby must not drop the connection.
   await guest.getByRole('button', { name: /Справка по игре/ }).click();
   await guest.getByRole('button', { name: 'Закрыть' }).click();
+
+  // Civilizations picked by the players.
+  await host.getByRole('radio', { name: /Выбор игроков/ }).click();
+  await host.getByRole('button', { name: /^Египет/ }).click();
+  await guest.getByRole('button', { name: /^Египет/ }).and(guest.locator(':disabled')).waitFor();
+  await guest.getByRole('button', { name: /^Рим/ }).click();
+  await host.locator('.players li', { hasText: 'Рим' }).waitFor();
+  check(await host.getByRole('button', { name: 'Начать игру' }).isDisabled(), 'start must wait for every pick');
+  await host.getByText(/Ещё не выбрали цивилизацию: Вася/).waitFor();
+  await shot(guest, 'e0-civ-pick');
+  await third.getByRole('button', { name: 'Выбрать случайную' }).click();
+  await host.locator('.players li', { hasText: 'Вася' }).locator('.muted', { hasNotText: 'выбирает' }).waitFor();
   await host.getByRole('button', { name: 'Начать игру' }).click();
   for (const p of [host, guest, third]) await p.locator('.cards .card').first().waitFor({ timeout: 15000 });
 
   // The hand tab tells where the hand goes (epoch I passes to the left).
   const pass = (await host.locator('.pass').textContent()) ?? '';
+  check(await host.getByText('Великая пирамида').isVisible(), 'host must play Egypt');
+  check(await guest.getByText('Колизей').isVisible(), 'guest must play Rome');
+
+  // The expanded card survives a tab switch.
+  await host.locator('.cards .card-head').first().click();
+  await host.getByRole('button', { name: 'Город' }).click();
+  await host.getByRole('button', { name: 'Рука' }).click();
+  check(await host.getByRole('button', { name: 'Продать за 3🪙' }).isVisible(), 'card must stay expanded');
+  await host.locator('.cards .card-head').first().click();
   check(/рука перейдёт влево ◀ (Петя|Вася)$/.test(pass), `pass hint: ${pass}`);
 
   // The host hands Вася's seat to a bot; Вася is dropped, the game goes on.

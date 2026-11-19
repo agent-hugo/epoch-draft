@@ -39,6 +39,7 @@ export class Player {
     private name: string,
   ) {}
 
+
   start(): void {
     this.bus.onStatus((connected) => {
       this.update({ connected });
@@ -78,6 +79,12 @@ export class Player {
   rename(name: string): void {
     this.name = name;
     void this.bus.publish(topics.join(this.room, this.id), { name } satisfies JoinMsg, true);
+  }
+
+  /** Asks the host for a civilization (manual mode); undefined drops the pick. */
+  pickCiv(civ: string | null): void {
+    const msg: JoinMsg = { name: this.name, civ };
+    void this.bus.publish(topics.join(this.room, this.id), msg, true);
   }
 
   send(choice: Choice): void {
