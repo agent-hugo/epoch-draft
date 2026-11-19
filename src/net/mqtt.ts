@@ -6,6 +6,9 @@ export interface BrokerConfig {
   token: string;
 }
 
+/** Retained messages expire after 90 days, so abandoned rooms disappear from the broker. */
+export const RETAIN_EXPIRY_S = 90 * 24 * 60 * 60;
+
 export type Handler = (topic: string, payload: unknown) => void;
 
 /** Thin JSON wrapper over mqtt.js with topic-filter handlers. */
@@ -26,7 +29,13 @@ export class Bus {
       connectTimeout: 10000,
       clientId: `ed-${Math.random().toString(16).slice(2, 12)}`,
       will: opts.will
-        ? { topic: opts.will.topic, payload: JSON.stringify(opts.will.payload), qos: 1, retain: true }
+        ? {
+            topic: opts.will.topic,
+            payload: JSON.stringify(opts.will.payload),
+            qos: 1,
+            retain: true,
+            properties: { messageExpiryInterval: RETAIN_EXPIRY_S },
+          }
         : undefined,
     });
     this.client.on('connect', () => this.setOnline(true));
@@ -89,7 +98,8 @@ export class Bus {
   publish(topic: string, payload: unknown, retain = false): Promise<void> {
     const body = payload === null ? '' : JSON.stringify(payload);
     return new Promise((resolve, reject) => {
-      this.client.publish(topic, body, { qos: 1, retain }, (err) => (err ? reject(err) : resolve()));
+      const properties = retain ? { messageExpiryInterval: RETAIN_EXPIRY_S } : undefined;
+      this.client.publish(topic, body, { qos: 1, retain, properties }, (err) => (err ? reject(err) : resolve()));
     });
   }
 
