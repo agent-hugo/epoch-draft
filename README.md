@@ -35,5 +35,12 @@ MQTT_TOKEN=... npm run e2e                           # партия через �
 MQTT_URL=wss://... MQTT_TOKEN=... npm run retain-expiry -- [--apply] [--days 7] [--all]
 ```
 
+Удалить комнаты с брокера целиком (все их retained-сообщения), например
+оставшиеся после тестов; без кодов — все комнаты, без `--apply` только список:
+
+```sh
+MQTT_URL=wss://... MQTT_TOKEN=... npm run clear-rooms -- [--apply] [КОД...]
+```
+
 Чтобы играть, нужны адрес MQTT-брокера с WebSocket (TLS) и токен; их вводят в
 настройках приложения.
