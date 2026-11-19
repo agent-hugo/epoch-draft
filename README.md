@@ -22,7 +22,7 @@ npm run build      # сборка в dist/
 Сетевые проверки требуют брокер:
 
 ```sh
-MQTT_URL=wss://... MQTT_TOKEN=... npm run net-smoke   # партия через брокер без UI
+MQTT_URL=wss://... MQTT_TOKEN=... npm run net-smoke   # партия через брокер без UI (KEEP=1 — оставить комнату на брокере)
 MQTT_TOKEN=... npm run e2e                           # партия через интерфейс (Playwright + Chrome)
 ```
 

@@ -68,8 +68,8 @@ scoreGame(db, g).forEach((s, i) => console.log(`  ${g.players[i]!.name.padEnd(16
 await waitFor(() => players.every((p) => p.snapshot.pub?.phase === 'over' && p.snapshot.lobby?.over), 'clients saw the end');
 console.log('clients saw the final state');
 
-// Clean up retained messages of the test room.
-for (const t of [
+// Clean up retained messages of the test room, unless KEEP=1 asks to leave it for inspection.
+for (const t of process.env.KEEP ? [] : [
   topics.lobby(room),
   topics.publicState(room),
   topics.hostState(room),
@@ -83,6 +83,7 @@ for (const t of [
   await hostBus.publish(t, null, true);
 }
 await Promise.all(buses.map((b) => b.end()));
+if (process.env.KEEP) console.log(`room ${room} kept on the broker`);
 console.log('ok');
 process.exit(0);
 
