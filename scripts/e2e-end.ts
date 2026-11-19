@@ -81,11 +81,11 @@ try {
   await host.getByText('Значки', { exact: true }).click();
   await shot(host, 'e1-help-login');
   // Outside a room any world can be browsed.
-  await host.getByRole('radio', { name: 'Космос' }).click();
+  await host.getByRole('combobox', { name: 'Мир' }).selectOption({ label: 'Космос' });
   await host.locator('.world-line', { hasText: 'Космос' }).waitFor();
   await host.getByText('реголит (сырьё)').waitFor();
   await shot(host, 'e1-help-space');
-  await host.getByRole('radio', { name: 'Древний мир' }).click();
+  await host.getByRole('combobox', { name: 'Мир' }).selectOption({ label: 'Древний мир' });
   await host.getByRole('button', { name: 'Закрыть' }).click();
   await host.getByRole('button', { name: /Справка по игре/ }).click();
   check((await openSections(host)) === 1, 'help must remember open sections');
@@ -112,13 +112,14 @@ try {
   // The world of the room is shown to everybody; with several worlds the host picks it.
   await guest.getByRole('heading', { name: 'Мир' }).waitFor();
   await guest.getByText('Древний мир', { exact: true }).waitFor();
-  await host.getByRole('radio', { name: /^Космос/ }).click();
+  await host.getByRole('combobox', { name: 'Мир' }).selectOption({ label: 'Космос' });
   await guest.getByText('Космос', { exact: true }).waitFor();
+  check(!(await guest.getByRole('combobox', { name: 'Мир' }).isVisible()), 'only the host picks the world');
   await guest.getByRole('button', { name: /Справка по игре/ }).click();
   check(!(await guest.locator('.help-worlds').isVisible()), 'room help must not offer other worlds');
   await guest.locator('.world-line', { hasText: 'Космос' }).waitFor();
   await guest.getByRole('button', { name: 'Закрыть' }).click();
-  await host.getByRole('radio', { name: /^Древний мир/ }).click();
+  await host.getByRole('combobox', { name: 'Мир' }).selectOption({ label: 'Древний мир' });
   await guest.getByText('Древний мир', { exact: true }).waitFor();
   await host.getByRole('heading', { name: 'Мир' }).scrollIntoViewIfNeeded();
   await shot(host, 'e0-lobby');

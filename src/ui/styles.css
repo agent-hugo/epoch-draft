@@ -90,6 +90,16 @@ input {
   min-width: 0;
 }
 
+select {
+  font: inherit;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  max-width: 100%;
+}
+
 button {
   font: inherit;
   padding: 10px 14px;
@@ -646,12 +656,12 @@ a {
   border-radius: 8px;
   margin: 8px 0 0;
 }
-.world-picker {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 8px;
-  display: grid;
-  gap: 6px;
+.world-select {
+  display: block;
+  width: 100%;
+}
+.world-desc {
+  margin: 6px 0 8px;
 }
 .world-line {
   margin: 0 0 8px;

@@ -77,23 +77,29 @@ function HelpOverlay({ world, onClose }: { world?: string; onClose: () => void }
       </header>
       <main class="tab-body">
         {!world && worlds.length > 1 && (
-          <div class="segmented help-worlds" role="radiogroup" aria-label="Мир">
-            {worlds.map((w) => (
-              <button
-                key={w.id}
-                role="radio"
-                aria-checked={w.id === shown}
-                class={w.id === shown ? 'active' : ''}
-                onClick={() => setPicked((helpWorld = w.id))}
-              >
-                {w.name}
-              </button>
-            ))}
-          </div>
+          <WorldSelect class="help-worlds" value={shown} onChange={(id) => setPicked((helpWorld = id))} />
         )}
         <Reference db={worldDb(shown)} />
       </main>
     </div>
+  );
+}
+
+/** The world picker: a drop-down list wherever a world can be chosen. */
+function WorldSelect(props: { value: string; onChange: (id: string) => void; class?: string }) {
+  return (
+    <select
+      class={`world-select ${props.class ?? ''}`}
+      aria-label="Мир"
+      value={props.value}
+      onChange={(e) => props.onChange(e.currentTarget.value)}
+    >
+      {worlds.map((w) => (
+        <option key={w.id} value={w.id}>
+          {w.name}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -389,24 +395,16 @@ function Lobby(props: {
 
       <h2>Мир</h2>
       {host && worlds.length > 1 ? (
-        <ul class="world-picker" role="radiogroup" aria-label="Мир">
-          {worlds.map((w) => (
-            <li key={w.id}>
-              <button
-                class={`civ-option ${w.id === world.id ? 'mine' : ''}`}
-                role="radio"
-                aria-checked={w.id === world.id}
-                onClick={() => {
-                  host.setWorld(w.id);
-                  props.refresh();
-                }}
-              >
-                <b>{w.name}</b>
-                {w.description && <div class="small muted">{w.description}</div>}
-              </button>
-            </li>
-          ))}
-        </ul>
+        <>
+          <WorldSelect
+            value={world.id}
+            onChange={(id) => {
+              host.setWorld(id);
+              props.refresh();
+            }}
+          />
+          {world.description && <p class="small muted world-desc">{world.description}</p>}
+        </>
       ) : (
         <p class="small">
           <b>{world.name}</b>

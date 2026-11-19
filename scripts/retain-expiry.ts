@@ -1,23 +1,25 @@
 /**
- * Re-publishes retained messages with a message expiry interval, so retained
- * messages published before the expiry was set also go away in time.
+ * Re-publishes the project's retained messages with a message expiry
+ * interval, so retained messages published before the expiry was set also go
+ * away in time.
  *
- * Subscribes to a topic filter, collects the retained messages the broker
- * sends (it stops after a quiet period), then publishes each one again with
- * the same payload and properties plus the expiry.
+ * Subscribes to the project's topic tree; the broker delivers the retained
+ * messages before the SUBACK, so once the subscription is acknowledged each
+ * message is published again with the same payload and the expiry; other
+ * properties are not carried over. Then it subscribes again and checks that
+ * every retained message has an expiry.
  *
  * Usage:
- *   MQTT_URL=wss://... MQTT_TOKEN=... npx tsx scripts/retain-expiry.ts [options] [filter]
+ *   MQTT_URL=wss://... MQTT_TOKEN=... npm run retain-expiry -- [options]
  *
- *   filter        topic filter, default '#'
  *   --apply       actually re-publish; without it only lists what would change
  *   --days N      expiry in days, default 90 (the one the app uses)
  *   --all         also re-publish messages that already have an expiry
- *   --quiet MS    how long to wait for more retained messages, default 3000
  */
 import mqtt from 'mqtt';
-import type { IPublishPacket } from 'mqtt';
+import type { IPublishPacket, MqttClient } from 'mqtt';
 import { RETAIN_EXPIRY_S } from '../src/net/mqtt';
+import { TOPIC_ROOT } from '../src/net/protocol';
 
 const url = process.env.MQTT_URL;
 const token = process.env.MQTT_TOKEN;
@@ -26,25 +28,23 @@ if (!url || !token) {
   process.exit(2);
 }
 
+const filter = `${TOPIC_ROOT}/#`;
 const args = process.argv.slice(2);
-let filter = '#';
 let apply = false;
 let all = false;
 let expiry = RETAIN_EXPIRY_S;
-let quietMs = 3000;
 for (let i = 0; i < args.length; i++) {
   const a = args[i]!;
   if (a === '--apply') apply = true;
   else if (a === '--all') all = true;
   else if (a === '--days') expiry = Math.round(Number(args[++i]) * 24 * 60 * 60);
-  else if (a === '--quiet') quietMs = Number(args[++i]);
-  else if (a.startsWith('--')) {
-    console.error(`unknown option ${a}`);
+  else {
+    console.error(`unknown argument ${a}`);
     process.exit(2);
-  } else filter = a;
+  }
 }
-if (!(expiry > 0) || !(quietMs > 0)) {
-  console.error('--days and --quiet must be positive numbers');
+if (!(expiry > 0)) {
+  console.error('--days must be a positive number');
   process.exit(2);
 }
 
@@ -61,25 +61,21 @@ await new Promise<void>((resolve, reject) => {
   client.once('error', reject);
 });
 
-// Only messages the broker sends because they are retained; live traffic
-// (including our own re-publishes) arrives without the retain flag.
-const found = new Map<string, IPublishPacket>();
-let timer: ReturnType<typeof setTimeout> | undefined;
-let done!: () => void;
-const quiet = new Promise<void>((r) => (done = r));
-const bump = () => {
-  clearTimeout(timer);
-  timer = setTimeout(done, quietMs);
-};
-client.on('message', (topic, payload, packet) => {
-  if (!packet.retain || payload.length === 0) return;
-  found.set(topic, packet);
-  bump();
-});
-await client.subscribeAsync(filter, { qos: 1, nl: true, rh: 0 });
-bump();
-await quiet;
+/** Retained messages under the filter, as the broker sends them on subscribe. */
+async function retained(client: MqttClient): Promise<Map<string, IPublishPacket>> {
+  const found = new Map<string, IPublishPacket>();
+  // Live traffic (including our own re-publishes) arrives without the retain flag.
+  const onMessage = (topic: string, payload: Buffer, packet: IPublishPacket) => {
+    if (packet.retain && payload.length > 0) found.set(topic, packet);
+  };
+  client.on('message', onMessage);
+  await client.subscribeAsync(filter, { qos: 1, nl: true, rh: 0 });
+  client.off('message', onMessage);
+  await client.unsubscribeAsync(filter);
+  return found;
+}
 
+const found = await retained(client);
 let todo = 0;
 let skipped = 0;
 for (const [topic, packet] of [...found].sort(([a], [b]) => a.localeCompare(b))) {
@@ -91,13 +87,10 @@ for (const [topic, packet] of [...found].sort(([a], [b]) => a.localeCompare(b)))
   todo++;
   console.log(`${apply ? 'republish' : 'would republish'} ${topic} (${packet.payload.length} B${left !== undefined ? `, expiry ${left}s left` : ''})`);
   if (!apply) continue;
-  // Keep what describes the content. User properties are not copied: the app
-  // sets none, and the broker adds its own (timestamp, sender) on publish.
-  const { payloadFormatIndicator, contentType, responseTopic, correlationData } = packet.properties ?? {};
   await client.publishAsync(topic, packet.payload as Buffer, {
     qos: 1,
     retain: true,
-    properties: { payloadFormatIndicator, contentType, responseTopic, correlationData, messageExpiryInterval: expiry },
+    properties: { messageExpiryInterval: expiry },
   });
 }
 
@@ -105,4 +98,11 @@ console.log(
   `${found.size} retained under '${filter}': ${todo} ${apply ? 're-published' : 'to re-publish'}, ${skipped} already expire` +
     (apply ? '' : ' (dry run; add --apply)'),
 );
+
+if (apply && todo > 0) {
+  const missing = [...(await retained(client))].filter(([, p]) => p.properties?.messageExpiryInterval === undefined);
+  for (const [topic] of missing) console.log(`still without expiry: ${topic}`);
+  console.log(missing.length ? `${missing.length} retained messages still have no expiry` : 'check: every retained message has an expiry');
+  if (missing.length) process.exitCode = 1;
+}
 await client.endAsync();
