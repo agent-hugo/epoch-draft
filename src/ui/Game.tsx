@@ -575,6 +575,7 @@ function CardFace({ db, card, chain, affordable }: { db: Db; card: CardDef; chai
       <div class="effects">{effectsText(db, card.effects)}</div>
       <div class="meta small">
         <span class={affordable === false ? 'cant' : ''}>
+          {affordable && <span class="can-mark">✓ </span>}
           {chain ? 'бесплатно по цепочке' : <>цена: {costText(db, card.cost)}</>}
         </span>
         {card.chainsTo && <span class="muted"> · даром потом: {card.chainsTo.map((id) => db.card(id).name).join(', ')}</span>}
