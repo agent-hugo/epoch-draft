@@ -1,10 +1,10 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { TURNS_PER_EPOCH, type Db } from '../engine/db';
-import { leftOf, production, rightOf, type PaymentOption } from '../engine/payment';
+import { coinsNeeded, leftOf, production, rightOf, type PaymentOption } from '../engine/payment';
 import { DEFEAT_POINTS, handOptions, nextStageCost, SELL_COINS, VICTORY_POINTS, type CardOptions } from '../engine/rules';
 import { military, ranking, scoreGame, scorePlayer } from '../engine/scoring';
-import type { CardDef, Choice, GameState, LogEntry, PlayerState, ScoreBreakdown } from '../engine/types';
+import type { CardDef, Choice, Cost, GameState, LogEntry, PlayerState, ScoreBreakdown } from '../engine/types';
 import type { ClientSnapshot, Player } from '../net/client';
 import type { Host } from '../net/host';
 import { playerView } from '../net/protocol';
@@ -492,6 +492,8 @@ function HandTab(props: {
               {open === o.card && !isChosen && (
                 <CardActions
                   db={db}
+                  state={view}
+                  i={i}
                   me={me}
                   o={o}
                   hasStage={!!stageCost}
@@ -589,8 +591,19 @@ function payLabel(db: Db, p: PaymentOption): ComponentChildren {
   return joined(parts, ', ');
 }
 
+/** Why player `i` cannot pay `cost` this turn: coins or resources. */
+function shortfall(db: Db, state: GameState, i: number, cost: Cost): string {
+  const coins = state.players[i]!.coins;
+  const need = coinsNeeded(db, state, i, cost);
+  if (need === undefined) return 'не хватает ресурсов, и у соседей их не купить';
+  const what = need > (cost.coins ?? 0) ? 'не хватает монет на покупку у соседей' : 'не хватает монет';
+  return `${what}: нужно ${need}🪙, у вас ${coins}🪙`;
+}
+
 function CardActions(props: {
   db: Db;
+  state: GameState;
+  i: number;
   me: PlayerState;
   o: CardOptions;
   hasStage: boolean;
@@ -604,7 +617,7 @@ function CardActions(props: {
       {built ? (
         <div class="small muted">Такая карта уже есть в городе.</div>
       ) : o.build.length === 0 ? (
-        <div class="small muted">Построить нельзя: не хватает ресурсов или монет.</div>
+        <div class="small muted">Построить нельзя: {shortfall(props.db, props.state, props.i, props.db.card(o.card).cost)}.</div>
       ) : (
         o.build.slice(0, 3).map((p, k) => (
           <button key={`b${k}`} class="primary" onClick={() => props.onChoose({ action: 'build', card: o.card, trade: p.trade }, p)}>
@@ -621,7 +634,9 @@ function CardActions(props: {
             </button>
           ))
         ) : (
-          <div class="small muted">На стадию сооружения не хватает ресурсов.</div>
+          <div class="small muted">
+            Стадию {props.stageNo} не построить: {shortfall(props.db, props.state, props.i, nextStageCost(props.db, me)!)}.
+          </div>
         ))}
       <button onClick={() => props.onChoose({ action: 'sell', card: o.card })}>Продать за 3🪙</button>
     </div>
@@ -677,7 +692,7 @@ function CityView({ db, state, i }: { db: Db; state: GameState; i: number }) {
 function ScoreLine({ s }: { s: ScoreBreakdown }) {
   return (
     <div class="small score-line">
-      Сейчас: <b>{s.total}⭐</b> (армия {s.military}, монеты {s.coins}, сооружение {s.monument}, культура {s.culture},
+      Очки: <b>{s.total}⭐</b> (армия {s.military}, монеты {s.coins}, сооружение {s.monument}, культура {s.culture},
       торговля {s.trade}, династии {s.dynasty}, наука {s.science})
     </div>
   );

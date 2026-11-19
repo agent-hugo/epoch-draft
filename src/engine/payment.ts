@@ -206,3 +206,13 @@ export function checkPayment(
   if (total > p.coins) return { error: 'not enough coins' };
   return { left, right, total };
 }
+
+/**
+ * Coins the cheapest way to pay `cost` would take, whatever player `i` has
+ * now; undefined when neither the city nor the neighbours have the resources.
+ */
+export function coinsNeeded(db: Db, state: GameState, i: number, cost: Cost): number | undefined {
+  const rich = structuredClone(state);
+  rich.players[i]!.coins = Number.MAX_SAFE_INTEGER;
+  return paymentOptions(db, rich, i, cost)[0]?.total;
+}

@@ -8,6 +8,7 @@ import {
   createGame,
   handOptions,
   paymentOptions,
+  coinsNeeded,
   RuleError,
   scienceScore,
   scoreGame,
@@ -71,6 +72,10 @@ describe('production and payment', () => {
     s.players[0]!.coins = 0;
     s.players[0]!.city = [];
     expect(paymentOptions(db, s, 0, { res: { ore: 1 } })).toEqual([]);
+    // Without coins the ore is still for sale: it takes 2🪙. Wood is nowhere.
+    expect(coinsNeeded(db, s, 0, { res: { ore: 1 } })).toBe(2);
+    expect(coinsNeeded(db, s, 0, { res: { wood: 1 } })).toBeUndefined();
+    expect(s.players[0]!.coins).toBe(0);
   });
 
   it('does not let neighbours sell non-tradable production', () => {
