@@ -777,3 +777,10 @@ a {
   margin: 12px 0 6px;
   font-size: 1rem;
 }
+
+.final-cities {
+  margin-bottom: 16px;
+}
+.final-cities .city {
+  margin-top: 8px;
+}
