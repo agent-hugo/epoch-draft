@@ -39,6 +39,8 @@ export interface LobbyMsg {
   host: string;
   players: LobbyPlayer[];
   started: boolean;
+  /** The game has been played to the end. */
+  over?: boolean;
   /** Missing means random. */
   civMode?: CivMode;
   /** World id; missing means the default world. */

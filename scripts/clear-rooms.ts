@@ -55,7 +55,7 @@ const onMessage = (topic: string, payload: Buffer, packet: mqtt.IPublishPacket) 
     const msg = JSON.parse(payload.toString());
     if (leaf === 'lobby') {
       const names = (msg.players ?? []).map((p: { name: string }) => p.name).join(', ');
-      room.summary = `${msg.started ? 'started' : 'lobby'}: ${names || 'no players'}` + (room.summary.startsWith('closed') ? `; ${room.summary}` : '');
+      room.summary = `${msg.over ? 'over' : msg.started ? 'started' : 'lobby'}: ${names || 'no players'}` + (room.summary.startsWith('closed') ? `; ${room.summary}` : '');
     } else if (leaf === 'closed') {
       room.summary = room.summary ? `${room.summary}; closed by ${msg.by}` : `closed by ${msg.by}`;
     }

@@ -112,7 +112,7 @@ export function RoomList({ onEnter }: { onEnter: (room: string) => void }) {
               <li key={code}>
                 <div class="room-head">
                   <b class="room-list-code">{code}</b>
-                  <span class="tag">{lobby.started ? 'идёт игра' : 'набор игроков'}</span>
+                  <span class="tag">{lobby.over ? 'игра окончена' : lobby.started ? 'идёт игра' : 'набор игроков'}</span>
                   {lobby.host === pid && <span class="tag">вы хост</span>}
                   {lobby.host !== pid && lobby.players.some((p) => p.id === pid) && <span class="tag">вы играете</span>}
                 </div>

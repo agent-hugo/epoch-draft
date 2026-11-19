@@ -216,6 +216,7 @@ export class Host {
 
   private async publishAll(): Promise<void> {
     if (this.closed) return;
+    if (this.game?.phase === 'over') this.lobby.over = true;
     const pubs: Promise<void>[] = [this.bus.publish(topics.lobby(this.room), this.lobby, true)];
     const g = this.game;
     if (g) {

@@ -65,7 +65,7 @@ await waitFor(() => host.game?.phase === 'over', 'game over', 120_000);
 const g = host.game!;
 console.log(`game finished in ${((Date.now() - t0) / 1000).toFixed(1)}s, ${g.log.length} moves`);
 scoreGame(db, g).forEach((s, i) => console.log(`  ${g.players[i]!.name.padEnd(16)} ${s.total}`));
-await waitFor(() => players.every((p) => p.snapshot.pub?.phase === 'over'), 'clients saw the end');
+await waitFor(() => players.every((p) => p.snapshot.pub?.phase === 'over' && p.snapshot.lobby?.over), 'clients saw the end');
 console.log('clients saw the final state');
 
 // Clean up retained messages of the test room.
