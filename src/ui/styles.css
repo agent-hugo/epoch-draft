@@ -784,3 +784,7 @@ a {
 .final-cities .city {
   margin-top: 8px;
 }
+/* A card that costs nothing to build. */
+.meta .free {
+  color: var(--ok);
+}
