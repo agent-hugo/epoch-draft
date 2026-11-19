@@ -16,7 +16,7 @@ const shots = process.argv[2];
 const PORT = 4173;
 const base = `http://localhost:${PORT}/`;
 
-const server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' });
+const server = spawn('node_modules/.bin/vite', ['preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' });
 await new Promise((r) => setTimeout(r, 1500));
 
 const browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'chrome' });

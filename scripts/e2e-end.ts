@@ -16,7 +16,7 @@ const shots = process.argv[2];
 const PORT = 4174;
 const base = `http://localhost:${PORT}/`;
 
-const server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' });
+const server = spawn('node_modules/.bin/vite', ['preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' });
 await new Promise((r) => setTimeout(r, 1500));
 
 const browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'chrome' });
@@ -218,7 +218,7 @@ try {
   const summary = host.getByRole('dialog', { name: 'Итоги хода' });
   await summary.waitFor();
   const text = await summary.innerText();
-  check(/Итоги хода 1/.test(text) && /Вы\s+продали «/.test(text) && /Петя\s+продал\(а\) карту за 3🪙/.test(text), `summary: ${text}`);
+  check(/Итоги хода 1/.test(text) && /Мама\s+продал\(а\) «/.test(text) && /Петя\s+продал\(а\) карту за 3🪙/.test(text), `summary: ${text}`);
   check(/🤖 Вася/.test(text), `summary must list the bot: ${text}`);
   await shot(host, 'e0-summary');
   for (const p of [host, guest]) await p.getByRole('dialog', { name: 'Итоги хода' }).getByRole('button', { name: 'Дальше' }).click();
