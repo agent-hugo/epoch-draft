@@ -5,7 +5,7 @@
  */
 import { spawn } from 'node:child_process';
 import { inviteHash } from '../src/ui/invite';
-import { chromium, type Page } from 'playwright';
+import { chromium, type Locator, type Page } from 'playwright';
 
 const token = process.env.MQTT_TOKEN;
 if (!token) {
@@ -123,7 +123,9 @@ try {
         if (moves > 20 && moves < 25) await shot(p, '4-summary');
         await summary.getByRole('button', { name: 'Дальше' }).click();
       }
-      const turnKey = await p.locator('.bar').textContent();
+      // No bar: the game has just ended on this page.
+      const turnKey = await p.locator('.bar').textContent({ timeout: 2000 }).catch(() => null);
+      if (turnKey === null) continue;
       if (await p.locator('.banner.ok').isVisible()) continue; // already chose this turn
       if (shots && moves >= 30 && !cityShot && p === host) {
         cityShot = true;
@@ -133,26 +135,13 @@ try {
       }
       const cards = p.locator('.cards .card');
       if ((await cards.count()) === 0) continue;
-      // Prefer a card that can be built, otherwise sell the first one.
-      const n = await cards.count();
-      let picked = false;
-      for (let k = 0; k < n && !picked; k++) {
-        await cards.nth(k).locator('.card-head').click();
-        const build = cards.nth(k).getByRole('button', { name: /^Построить/ });
-        if (await build.count()) {
-          if (moves === 3) await shot(p, '3-actions');
-          await build.first().click();
-          if (moves === 3) await shot(p, '3-confirm');
-          await p.getByRole('dialog').getByRole('button', { name: 'Подтвердить' }).click();
-          picked = true;
-        } else {
-          await cards.nth(k).locator('.card-head').click();
-        }
-      }
-      if (!picked) {
-        await cards.first().locator('.card-head').click();
-        await cards.first().getByRole('button', { name: /^Продать/ }).click();
-        await p.getByRole('dialog').getByRole('button', { name: 'Подтвердить' }).click();
+      try {
+        await pickMove(p, cards, moves === 3);
+      } catch (e) {
+        // The next turn's summary may pop up over the old hand at any moment:
+        // go round again, it is closed first.
+        if ((e as Error).name !== 'TimeoutError' || !(await p.locator('.modal-back').count())) throw e;
+        continue;
       }
       moves++;
       await p.waitForFunction(
@@ -191,4 +180,25 @@ try {
 } finally {
   await browser.close();
   server.kill();
+}
+
+/** Builds the first card that can be built, otherwise sells the first one. */
+async function pickMove(p: Page, cards: Locator, withShots: boolean) {
+  const click = { timeout: 5000 };
+  const n = await cards.count();
+  for (let k = 0; k < n; k++) {
+    await cards.nth(k).locator('.card-head').click(click);
+    const build = cards.nth(k).getByRole('button', { name: /^Построить/ });
+    if (await build.count()) {
+      if (withShots) await shot(p, '3-actions');
+      await build.first().click(click);
+      if (withShots) await shot(p, '3-confirm');
+      await p.getByRole('dialog').getByRole('button', { name: 'Подтвердить' }).click(click);
+      return;
+    }
+    await cards.nth(k).locator('.card-head').click(click);
+  }
+  await cards.first().locator('.card-head').click(click);
+  await cards.first().getByRole('button', { name: /^Продать/ }).click(click);
+  await p.getByRole('dialog').getByRole('button', { name: 'Подтвердить' }).click(click);
 }

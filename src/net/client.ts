@@ -42,6 +42,8 @@ export class Player {
   snapshot: ClientSnapshot = { presence: {}, connected: false };
   private listeners = new Set<(s: ClientSnapshot) => void>();
   private cleared = false;
+  /** This connection has said 'online' (and joined, if needed). */
+  private announced = false;
 
   constructor(
     private bus: Bus,
@@ -54,7 +56,9 @@ export class Player {
   start(): void {
     this.bus.onStatus((connected) => {
       this.update({ connected });
-      if (connected) void this.announce();
+      // After a dropped connection the will has said 'offline'.
+      if (!connected) this.announced = false;
+      void this.announce();
     });
     this.bus.subscribe(topics.closed(this.room), (_t, p) => {
       if (!p) return;
@@ -64,22 +68,37 @@ export class Player {
     this.bus.subscribe(topics.lobby(this.room), (_t, p) => {
       this.update({ lobby: (p as LobbyMsg) ?? undefined });
       if (replacedByBot(this.snapshot, this.id)) void this.clearOwn();
+      else void this.announce();
     });
     this.bus.subscribe(topics.publicState(this.room), (_t, p) => this.update({ pub: (p as PublicState) ?? undefined }));
     this.bus.subscribe(topics.hand(this.room, this.id), (_t, p) => this.update({ hand: (p as HandMsg) ?? undefined }));
     this.bus.subscribe(topics.presenceAll(this.room), (t, p) =>
       this.update({ presence: { ...this.snapshot.presence, [lastLevel(t)]: p === 'online' } }),
     );
-    if (this.bus.online) {
-      this.update({ connected: true });
-      void this.announce();
-    }
+    if (this.bus.online) this.update({ connected: true });
   }
 
+  /**
+   * Says 'online' and joins once the lobby is known, and only where that
+   * means something: not in a finished game, not as an onlooker of a game
+   * already under way. The join is sent only if the lobby lacks this player
+   * under this name, so merely opening a room does not rewrite it.
+   */
   private async announce() {
-    if (this.gone) return;
+    const lobby = this.snapshot.lobby;
+    if (this.announced || this.gone || !this.snapshot.connected || !lobby || lobby.over) return;
+    const me = lobby.players.find((p) => p.id === this.id);
+    if (lobby.started && !me) return;
+    this.announced = true;
     await this.bus.publish(topics.presence(this.room, this.id), 'online', true);
-    await this.bus.publish(topics.join(this.room, this.id), { name: this.name } satisfies JoinMsg, true);
+    if (me?.name !== this.name)
+      await this.bus.publish(topics.join(this.room, this.id), { name: this.name } satisfies JoinMsg, true);
+  }
+
+  /** Leaving the room: 'offline', if 'online' was said. */
+  leave(): Promise<void> {
+    if (!this.announced || this.gone) return Promise.resolve();
+    return this.bus.publish(topics.presence(this.room, this.id), 'offline', true);
   }
 
   /** The room is closed or this player was replaced: nothing to publish any more. */
@@ -88,12 +107,15 @@ export class Player {
   }
 
   rename(name: string): void {
+    if (name === this.name) return;
     this.name = name;
     void this.bus.publish(topics.join(this.room, this.id), { name } satisfies JoinMsg, true);
   }
 
   /** Asks the host for a civilization (manual mode); undefined drops the pick. */
   pickCiv(civ: string | null): void {
+    const me = this.snapshot.lobby?.players.find((p) => p.id === this.id);
+    if (me && (me.civ ?? null) === civ) return;
     const msg: JoinMsg = { name: this.name, civ };
     void this.bus.publish(topics.join(this.room, this.id), msg, true);
   }
@@ -102,6 +124,10 @@ export class Player {
   send(choice: Choice | null): void {
     const pub = this.snapshot.pub;
     if (!pub) return;
+    // Already the move the host holds: nothing to tell it.
+    const hand = this.snapshot.hand;
+    if (hand && hand.epoch === pub.epoch && hand.turn === pub.turn && !hand.error)
+      if (JSON.stringify(hand.chosen ?? null) === JSON.stringify(choice)) return;
     const msg: ActionMsg = { epoch: pub.epoch, turn: pub.turn, choice };
     void this.bus.publish(topics.action(this.room, this.id), msg, true);
   }

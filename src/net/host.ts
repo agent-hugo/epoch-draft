@@ -72,8 +72,8 @@ export class Host {
     if (snapshot && snapshot.lobby.host === this.lobby.host) {
       this.lobby = snapshot.lobby;
       this.game = snapshot.game;
-      this.sent.set(topics.lobby(this.room), JSON.stringify(snapshot.lobby));
-      this.sent.set(topics.hostState(this.room), JSON.stringify(snapshot));
+      // All of it is on the broker already.
+      for (const [topic, msg] of this.messages()) this.sent.set(topic, JSON.stringify(msg));
     }
     for (const p of this.lobby.players) if (p.bot) this.bots.set(p.id, this.makeBot(p.id));
     this.bus.subscribe(topics.joinAll(this.room), (topic, payload) => this.onJoin(lastLevel(topic), payload as JoinMsg | null));
@@ -166,6 +166,7 @@ export class Host {
    */
   reorder(ids: string[]): void {
     if (this.closed || this.game?.phase === 'over') return;
+    if (ids.join() === this.lobby.players.map((p) => p.id).join()) return;
     const rank = (id: string) => {
       const k = ids.indexOf(id);
       return k < 0 ? ids.length : k;
@@ -264,30 +265,35 @@ export class Host {
     }
   }
 
-  private async publishAll(): Promise<void> {
-    if (this.closed) return;
-    if (this.game?.phase === 'over') this.lobby.over = true;
-    const pubs: Promise<void>[] = [];
-    const publish = (topic: string, msg: unknown) => {
-      const json = JSON.stringify(msg);
-      if (this.sent.get(topic) === json) return;
-      this.sent.set(topic, json);
-      pubs.push(this.bus.publish(topic, msg, true));
-    };
-    publish(topics.lobby(this.room), this.lobby);
+  /** The retained messages that make up the room's current state. */
+  private messages(): [string, unknown][] {
+    const out: [string, unknown][] = [[topics.lobby(this.room), this.lobby]];
     const g = this.game;
     if (g) {
-      publish(topics.publicState(this.room), publicView(g));
+      out.push([topics.publicState(this.room), publicView(g)]);
       for (const p of g.players) {
         if (this.bots.has(p.id)) continue;
         const msg: HandMsg = { epoch: g.epoch, turn: g.turn, hand: p.hand, chosen: g.pending[p.id] };
         const err = this.errors.get(p.id);
         if (err) msg.error = err;
-        publish(topics.hand(this.room, p.id), msg);
+        out.push([topics.hand(this.room, p.id), msg]);
       }
     }
     const snapshot: HostSnapshot = { lobby: this.lobby, game: g };
-    publish(topics.hostState(this.room), snapshot);
+    out.push([topics.hostState(this.room), snapshot]);
+    return out;
+  }
+
+  private async publishAll(): Promise<void> {
+    if (this.closed) return;
+    if (this.game?.phase === 'over') this.lobby.over = true;
+    const pubs: Promise<void>[] = [];
+    for (const [topic, msg] of this.messages()) {
+      const json = JSON.stringify(msg);
+      if (this.sent.get(topic) === json) continue;
+      this.sent.set(topic, json);
+      pubs.push(this.bus.publish(topic, msg, true));
+    }
     await Promise.all(pubs);
   }
 }

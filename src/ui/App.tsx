@@ -274,9 +274,7 @@ function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; on
     return () => {
       alive = false;
       unsub();
-      // A player out of the room has already removed its retained messages.
-      const bye = player.gone ? Promise.resolve() : bus.publish(topics.presence(room, pid), 'offline', true);
-      void bye.finally(() => bus.end());
+      void player.leave().finally(() => bus.end());
     };
   }, [room, pid]);
 
