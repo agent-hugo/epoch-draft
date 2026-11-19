@@ -33,6 +33,12 @@ export class Host {
   lobby: LobbyMsg;
   game?: GameState;
   private bots = new Map<string, Bot>();
+  /**
+   * What was last published to each retained topic: an unchanged message is
+   * not sent again, so merely opening a room keeps the lobby's broker time
+   * (the "updated" time of the room list).
+   */
+  private sent = new Map<string, string>();
   private errors = new Map<string, string>();
   /** The room was closed by a participant: never publish again. */
   private closed = false;
@@ -66,6 +72,8 @@ export class Host {
     if (snapshot && snapshot.lobby.host === this.lobby.host) {
       this.lobby = snapshot.lobby;
       this.game = snapshot.game;
+      this.sent.set(topics.lobby(this.room), JSON.stringify(snapshot.lobby));
+      this.sent.set(topics.hostState(this.room), JSON.stringify(snapshot));
     }
     for (const p of this.lobby.players) if (p.bot) this.bots.set(p.id, this.makeBot(p.id));
     this.bus.subscribe(topics.joinAll(this.room), (topic, payload) => this.onJoin(lastLevel(topic), payload as JoinMsg | null));
@@ -259,20 +267,27 @@ export class Host {
   private async publishAll(): Promise<void> {
     if (this.closed) return;
     if (this.game?.phase === 'over') this.lobby.over = true;
-    const pubs: Promise<void>[] = [this.bus.publish(topics.lobby(this.room), this.lobby, true)];
+    const pubs: Promise<void>[] = [];
+    const publish = (topic: string, msg: unknown) => {
+      const json = JSON.stringify(msg);
+      if (this.sent.get(topic) === json) return;
+      this.sent.set(topic, json);
+      pubs.push(this.bus.publish(topic, msg, true));
+    };
+    publish(topics.lobby(this.room), this.lobby);
     const g = this.game;
     if (g) {
-      pubs.push(this.bus.publish(topics.publicState(this.room), publicView(g), true));
+      publish(topics.publicState(this.room), publicView(g));
       for (const p of g.players) {
         if (this.bots.has(p.id)) continue;
         const msg: HandMsg = { epoch: g.epoch, turn: g.turn, hand: p.hand, chosen: g.pending[p.id] };
         const err = this.errors.get(p.id);
         if (err) msg.error = err;
-        pubs.push(this.bus.publish(topics.hand(this.room, p.id), msg, true));
+        publish(topics.hand(this.room, p.id), msg);
       }
     }
     const snapshot: HostSnapshot = { lobby: this.lobby, game: g };
-    pubs.push(this.bus.publish(topics.hostState(this.room), snapshot, true));
+    publish(topics.hostState(this.room), snapshot);
     await Promise.all(pubs);
   }
 }
