@@ -85,6 +85,12 @@ try {
     if (await host.locator('.cards .card.chosen').count()) throw new Error('the withdrawn card is still marked');
   }
 
+  // The neighbours tab shows who is online: the guest and the bot both are.
+  await host.getByRole('button', { name: 'Соседи' }).click();
+  await host.locator('.other .dot.on').nth(1).waitFor({ timeout: 5000 });
+  await shot(host, '2-others');
+  await host.getByRole('button', { name: 'Рука' }).click();
+
   let moves = 0;
   const done = (p: Page) => p.getByRole('heading', { name: /Победа|Победил/ }).isVisible();
   while (!(await done(host)) || !(await done(guest))) {

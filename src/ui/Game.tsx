@@ -106,7 +106,14 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
           />
         )}
         {tab === 'city' && <CityView db={db} state={view} i={i} />}
-        {tab === 'others' && <Others db={db} state={view} me={i} />}
+        {tab === 'others' && (
+          <Others
+            db={db}
+            state={view}
+            me={i}
+            online={(id) => !!snap.lobby?.players.find((p) => p.id === id)?.bot || !!snap.presence[id]}
+          />
+        )}
         {tab === 'help' && <Reference db={db} highlightCiv={me.civ} />}
         {tab === 'settings' && (
           <GameSettings room={room} pid={pid} snap={snap} player={player} host={host} onLeave={onLeave} />
@@ -640,7 +647,8 @@ function ScoreLine({ s }: { s: ScoreBreakdown }) {
   );
 }
 
-function Others({ db, state, me }: { db: Db; state: GameState; me: number }) {
+function Others(props: { db: Db; state: GameState; me: number; online?: (id: string) => boolean }) {
+  const { db, state, me, online } = props;
   const pid = state.players[me]?.id ?? '';
   const n = state.players.length;
   const order = [leftOf(n, me), rightOf(n, me), ...state.players.map((_, k) => k)].filter(
@@ -654,6 +662,7 @@ function Others({ db, state, me }: { db: Db; state: GameState; me: number }) {
         return (
           <details key={p.id} class="other" open={!!where}>
             <summary>
+              {online && <span class={`dot ${online(p.id) ? 'on' : ''}`} title={online(p.id) ? 'В сети' : 'Не в сети'} />}
               <b>{p.name}</b> · {db.civ(p.civ).name} {where && <span class="tag">{where}</span>}
               <span class="stats">
                 {p.coins}🪙 {military(db, state, k)}⚔️ {p.stages}/3🏛️
