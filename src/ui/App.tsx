@@ -8,6 +8,7 @@ import { getWorld, worldDb, worlds } from '../worlds';
 import { effectsText, joined, ResIcon } from './format';
 import { Game } from './Game';
 import { Reference } from './Reference';
+import { decodeInvite, inviteHash } from './invite';
 import { RoomList } from './Rooms';
 import { settings } from './storage';
 
@@ -15,13 +16,19 @@ function readHash(): URLSearchParams {
   return new URLSearchParams(location.hash.replace(/^#/, ''));
 }
 
-/** Applies a token from an invite link and removes it from the address bar. */
+/**
+ * Applies a token from an invite link (`#i=...`, or the older plain `#t=...`)
+ * and removes it from the address bar, leaving only the room.
+ */
 function consumeTokenFromHash(): void {
   const h = readHash();
-  const t = h.get('t');
-  if (!t) return;
-  settings.token = t;
+  const invite = decodeInvite(h.get('i'));
+  const t = invite.token ?? h.get('t');
+  if (!t && !h.has('i')) return;
+  if (t) settings.token = t;
+  h.delete('i');
   h.delete('t');
+  if (invite.room) h.set('room', invite.room);
   history.replaceState(null, '', `${location.pathname}${location.search}${h.toString() ? `#${h}` : ''}`);
 }
 
@@ -324,8 +331,7 @@ function Lobby(props: {
   const [copied, setCopied] = useState(false);
   const lobby = snap.lobby;
   const link = useMemo(() => {
-    const base = `${location.origin}${location.pathname}#room=${room}`;
-    return withToken ? `${base}&t=${encodeURIComponent(settings.token)}` : base;
+    return `${location.origin}${location.pathname}#${inviteHash(room, withToken ? settings.token : undefined)}`;
   }, [room, withToken]);
 
   if (!lobby)

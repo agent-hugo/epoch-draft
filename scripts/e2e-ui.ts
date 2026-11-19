@@ -4,6 +4,7 @@
  * Usage: MQTT_TOKEN=... npm run e2e -- [screenshot dir]
  */
 import { spawn } from 'node:child_process';
+import { inviteHash } from '../src/ui/invite';
 import { chromium, type Page } from 'playwright';
 
 const token = process.env.MQTT_TOKEN;
@@ -44,6 +45,16 @@ try {
   const room = (await host.locator('.room-code').textContent())!.trim();
   console.log('room', room);
   if ((await host.url()).includes('t=')) throw new Error('token left in the address bar');
+
+  // An invite link with the token: room and token come base64-packed in `#i=`.
+  // It points at a room nobody hosts, so the invited player does not join this game.
+  const invited = await (await browser.newContext(phone)).newPage();
+  await invited.goto(`${base}#${inviteHash('NOHOST', token!)}`);
+  await invited.getByLabel('Ваше имя').fill('Гость');
+  await invited.getByRole('button', { name: 'Сохранить' }).click();
+  await invited.getByText('Ждём хоста комнаты NOHOST').waitFor();
+  if (!invited.url().endsWith('#room=NOHOST')) throw new Error(`invite link left ${invited.url()}`);
+  await invited.context().close();
 
   const guest = await open('Петя');
   await guest.getByPlaceholder('Код комнаты').fill(room);
