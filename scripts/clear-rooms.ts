@@ -1,6 +1,6 @@
 /**
  * Deletes rooms from the broker: clears every retained message under
- * `epoch-draft/<room>/`, including the `closed` marker, so nothing of the
+ * `epoch-draft/room/<room>/`, including the `closed` marker, so nothing of the
  * room is left. Meant for rooms left over from tests.
  *
  * Usage:
@@ -10,7 +10,7 @@
  *   --apply   actually delete; without it only lists the rooms
  */
 import mqtt from 'mqtt';
-import { TOPIC_ROOT } from '../src/net/protocol';
+import { ROOMS_ROOT, roomOf } from '../src/net/protocol';
 
 const url = process.env.MQTT_URL;
 const token = process.env.MQTT_TOKEN;
@@ -42,16 +42,16 @@ await new Promise<void>((resolve, reject) => {
 });
 
 // Retained messages arrive before the SUBACK.
-const filter = `${TOPIC_ROOT}/#`;
+const filter = `${ROOMS_ROOT}/#`;
 const rooms = new Map<string, { topics: string[]; summary: string }>();
 const onMessage = (topic: string, payload: Buffer, packet: mqtt.IPublishPacket) => {
   if (!packet.retain || !payload.length) return;
-  const code = topic.split('/')[1] ?? '';
+  const code = roomOf(topic);
   if (only.size && !only.has(code)) return;
   const room = rooms.get(code) ?? { topics: [], summary: '' };
   room.topics.push(topic);
   try {
-    const leaf = topic.split('/')[2];
+    const leaf = topic.slice(ROOMS_ROOT.length + 1).split('/')[1];
     const msg = JSON.parse(payload.toString());
     if (leaf === 'lobby') {
       const names = (msg.players ?? []).map((p: { name: string }) => p.name).join(', ');

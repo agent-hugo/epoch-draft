@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { deleteRoom } from '../net/client';
 import { Bus } from '../net/mqtt';
-import { TOPIC_ROOT, type LobbyMsg } from '../net/protocol';
+import { roomOf, topics, type LobbyMsg } from '../net/protocol';
 import { getWorld, worlds } from '../worlds';
 import { ConfirmDialog, type Ask } from './dialog';
 import { settings } from './storage';
@@ -12,9 +12,6 @@ interface RoomInfo {
   /** When the lobby last changed, if the broker says. */
   time?: number;
 }
-
-/** Room code of `<root>/<room>/<leaf>`. */
-const roomOf = (topic: string) => topic.split('/')[1] ?? '';
 
 function ago(time: number): string {
   const min = Math.floor((Date.now() - time) / 60000);
@@ -49,13 +46,13 @@ export function RoomList({ onEnter }: { onEnter: (room: string) => void }) {
     b.ready()
       .then(() =>
         Promise.all([
-          b.subscribe(`${TOPIC_ROOT}/+/lobby`, (t, p, meta) => {
+          b.subscribe(topics.lobbyAll, (t, p, meta) => {
             const code = roomOf(t);
             if (p) found.set(code, { code, lobby: p as LobbyMsg, time: meta.time });
             else found.delete(code);
             show();
           }),
-          b.subscribe(`${TOPIC_ROOT}/+/closed`, (t, p) => {
+          b.subscribe(topics.closedAll, (t, p) => {
             if (p) closed.add(roomOf(t));
             else closed.delete(roomOf(t));
             show();
