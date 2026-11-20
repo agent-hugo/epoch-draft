@@ -967,10 +967,12 @@ function Final({ db, state, me, onLeave }: { db: Db; state: GameState; me: numbe
           </details>
         ))}
       </section>
-      <button onClick={() => setShowLog(!showLog)}>{showLog ? 'Скрыть ходы' : `Все ходы партии (${state.log.length})`}</button>
-      <button class="primary" onClick={onLeave}>
-        В меню
-      </button>
+      <div class="stack">
+        <button onClick={() => setShowLog(!showLog)}>{showLog ? 'Скрыть ходы' : `Все ходы партии (${state.log.length})`}</button>
+        <button class="primary" onClick={onLeave}>
+          В меню
+        </button>
+      </div>
       {/* Below the menu button, so that opening the log does not move it. */}
       {showLog && <GameLog db={db} state={state} pid={state.players[me]?.id ?? ''} />}
     </main>
