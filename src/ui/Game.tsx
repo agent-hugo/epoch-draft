@@ -71,6 +71,12 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
   useEffect(() => {
     if (!allDone) setEndAsk('');
   }, [allDone]);
+  // Against bots alone there is nobody to wait for: the turn ends at once.
+  const botsOnly = !!snap.lobby?.players.every((p) => p.id === pid || p.bot);
+  const autoEnd = !!host && botsOnly;
+  useEffect(() => {
+    if (autoEnd && allDone) host!.endTurn();
+  }, [autoEnd, allDone, turnKey]);
   useEffect(() => {
     if (lastKey === seenTurn.current) return;
     seenTurn.current = lastKey;
@@ -103,7 +109,7 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
       <div class="waiting small muted">
         {waiting.length ? `Ждём: ${waiting.join(', ')}` : host ? 'Все сделали выбор' : 'Все сделали выбор, ждём, пока хост завершит ход'}
       </div>
-      {host && allDone && endAsk === 'cancel' && (
+      {host && allDone && !autoEnd && endAsk === 'cancel' && (
         <div class="banner">
           Все сделали выбор.
           <button
@@ -117,7 +123,7 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
           </button>
         </div>
       )}
-      {host && allDone && endAsk === '' && !summary && (
+      {host && allDone && !autoEnd && endAsk === '' && !summary && (
         <ConfirmDialog
           ask={{
             text: 'Все сделали выбор. Завершить ход и перейти к следующему?',

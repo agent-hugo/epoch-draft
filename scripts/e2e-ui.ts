@@ -56,6 +56,31 @@ try {
   if (!invited.url().endsWith('#room=NOHOST')) throw new Error(`invite link left ${invited.url()}`);
   await invited.context().close();
 
+  // Against bots alone the host is not asked to end the turn: it ends at once.
+  {
+    const solo = await open('Соло');
+    await solo.getByRole('button', { name: 'Создать игру' }).click();
+    await solo.locator('.room-code').waitFor();
+    for (let k = 1; k <= 2; k++) {
+      await solo.getByRole('button', { name: 'Добавить бота' }).click();
+      await solo.locator('.players li', { hasText: 'Бот' }).nth(k - 1).waitFor();
+    }
+    await solo.getByRole('button', { name: 'Начать игру' }).click();
+    await solo.locator('.cards .card').first().waitFor({ timeout: 15000 });
+    const before = await solo.locator('.bar').textContent();
+    await pickMove(solo, solo.locator('.cards .card'), false);
+    await solo.getByRole('dialog', { name: 'Итоги хода' }).waitFor({ timeout: 10000 });
+    if ((await solo.locator('.bar').textContent()) === before) throw new Error('the solo turn did not move on');
+    if (await solo.getByRole('dialog').filter({ hasText: 'Завершить ход и перейти' }).count())
+      throw new Error('the solo host is asked to end the turn');
+    await solo.getByRole('dialog', { name: 'Итоги хода' }).getByRole('button', { name: 'Дальше' }).click();
+    await solo.getByRole('button', { name: 'Настройки' }).click();
+    await solo.getByRole('button', { name: /Завершить игру для всех/ }).click();
+    await solo.getByRole('dialog').getByRole('button', { name: 'Завершить', exact: true }).click();
+    await solo.getByRole('heading', { name: 'Игра завершена' }).waitFor({ timeout: 10000 });
+    await solo.context().close();
+  }
+
   const guest = await open('Петя');
   // The room code field takes letters, digits, '-' and '_' only.
   await guest.getByPlaceholder('Код комнаты').pressSequentially('a/b #+c-1_');
