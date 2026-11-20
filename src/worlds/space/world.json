@@ -9,7 +9,7 @@
     {"id": "crystal", "name": "кристаллы", "icon": "💎", "kind": "raw"},
     {"id": "metal", "name": "металл", "icon": "🔩", "kind": "raw"},
     {"id": "food", "name": "провизия", "icon": "🥫", "kind": "goods"},
-    {"id": "chips", "name": "микросхемы", "icon": "💾", "kind": "goods"},
+    {"id": "chips", "name": "микросхемы", "icon": "🖥️", "kind": "goods", "img": "chips.svg"},
     {"id": "fuel", "name": "топливо", "icon": "⛽", "kind": "goods"}
   ],
   "schools": [
