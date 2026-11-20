@@ -77,6 +77,11 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
   useEffect(() => {
     if (autoEnd && allDone) host!.endTurn();
   }, [autoEnd, allDone, turnKey]);
+  const askEnd = !!host && allDone && !autoEnd && endAsk === '' && !summary;
+  // A short buzz when the question pops up (phones that support it; iOS does not).
+  useEffect(() => {
+    if (askEnd) navigator.vibrate?.(150);
+  }, [askEnd]);
   useEffect(() => {
     if (lastKey === seenTurn.current) return;
     seenTurn.current = lastKey;
@@ -123,7 +128,7 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
           </button>
         </div>
       )}
-      {host && allDone && !autoEnd && endAsk === '' && !summary && (
+      {host && askEnd && (
         <ConfirmDialog
           ask={{
             text: 'Все сделали выбор. Завершить ход и перейти к следующему?',
