@@ -789,7 +789,7 @@ function CityView({ db, state, i, title = true }: { db: Db; state: GameState; i:
       )}
       <div class="small">Производство: {productionText(db, p)}</div>
       <div class="small">
-        {p.coins}🪙 · {military(db, state, i)}⚔️ · конфликты: {p.conflicts.length ? p.conflicts.join(' ') : '—'}
+        {p.coins}🪙 · {military(db, state, i)}⚔️ · {warText(p)}
       </div>
       <div class="small">
         {civ.monument.name}:
@@ -820,6 +820,18 @@ function CityView({ db, state, i, title = true }: { db: Db; state: GameState; i:
   );
 }
 
+const wins = (p: PlayerState) => p.conflicts.filter((c) => c > 0).length;
+const defeats = (p: PlayerState) => p.conflicts.filter((c) => c < 0).length;
+
+/** Victories and defeats in the wars so far, with what they are worth. */
+function warText(p: PlayerState): string {
+  const w = wins(p);
+  const d = defeats(p);
+  const pts = p.conflicts.filter((c) => c > 0).reduce((a, c) => a + c, 0);
+  if (!w && !d) return 'войны: пока не было';
+  return `войны: побед ${w}${w ? ` (+${pts}⭐)` : ''}, поражений ${d}${d ? ` (−${d}⭐)` : ''}`;
+}
+
 function ScoreLine({ s }: { s: ScoreBreakdown }) {
   return (
     <div class="small score-line">
@@ -847,9 +859,13 @@ function Others(props: { db: Db; state: GameState; me: number; online?: (id: str
               {online && <span class={`dot ${online(p.id) ? 'on' : ''}`} title={online(p.id) ? 'В сети' : 'Не в сети'} />}
               <b>{p.name}</b> · {db.civ(p.civ).name} {where && <span class="tag">{where}</span>}
               <span class="stats">
-                {p.coins}🪙 {military(db, state, k)}⚔️ {p.stages}/3🏛️
+                {p.coins}🪙 {military(db, state, k)}⚔️ {p.stages}/3🏛️{' '}
+                <span title="Победы и поражения в войнах">
+                  {wins(p)}🏆 {defeats(p)}💀
+                </span>
               </span>
             </summary>
+            <div class="small">{warText(p)}</div>
             <LastAction db={db} state={state} k={k} pid={pid} />
             <div class="small">Продаёт: {productionText(db, p, true)}</div>
             {TYPE_ORDER.map((t) => {
