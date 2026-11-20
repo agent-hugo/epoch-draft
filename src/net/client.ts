@@ -1,7 +1,6 @@
 import type { Choice } from '../engine/types';
 import type { Bus } from './mqtt';
 import {
-  presentIn,
   topics,
   type ActionMsg,
   type ClosedMsg,
@@ -84,8 +83,8 @@ export class Player {
     for (const p of this.snapshot.lobby?.players ?? []) {
       if (p.bot || this.watched.has(p.id)) continue;
       this.watched.add(p.id);
-      void this.bus.subscribe(topics.presence(p.id), (_t, msg) =>
-        this.update({ presence: { ...this.snapshot.presence, [p.id]: presentIn(msg, this.room) } }),
+      void this.bus.subscribe(topics.presence(p.id, this.room), (_t, msg) =>
+        this.update({ presence: { ...this.snapshot.presence, [p.id]: msg === 'online' } }),
       );
     }
   }
@@ -102,7 +101,7 @@ export class Player {
     const me = lobby.players.find((p) => p.id === this.id);
     if (lobby.started && !me) return;
     this.announced = true;
-    await this.bus.publish(topics.presence(this.id), { room: this.room } satisfies PresenceMsg, true);
+    await this.bus.publish(topics.presence(this.id, this.room), 'online' satisfies PresenceMsg, true);
     if (me?.name !== this.name)
       await this.bus.publish(topics.join(this.room, this.id), { name: this.name } satisfies JoinMsg, true);
   }
@@ -111,7 +110,7 @@ export class Player {
   leave(): Promise<void> {
     if (!this.announced) return Promise.resolve();
     this.announced = false;
-    return this.bus.publish(topics.presence(this.id), 'offline' satisfies PresenceMsg, true);
+    return this.bus.publish(topics.presence(this.id, this.room), 'offline' satisfies PresenceMsg, true);
   }
 
   /** The room is closed or this player was replaced: nothing to publish any more. */

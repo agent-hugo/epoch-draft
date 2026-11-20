@@ -20,3 +20,14 @@ describe('invite links', () => {
     expect(decodeInvite('%%%')).toEqual({});
   });
 });
+
+describe('room codes', () => {
+  it('keeps letters, digits, minus and underscore', async () => {
+    const { normalizeRoom } = await import('../src/net/protocol');
+    expect(normalizeRoom('ab-c_1/+#  ж')).toBe('AB-C_1Ж');
+  });
+  it('survives a plain invite link', () => {
+    const h = new URLSearchParams(inviteHash('ДОМ-1'));
+    expect(h.get('room')).toBe('ДОМ-1');
+  });
+});

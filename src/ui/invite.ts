@@ -23,7 +23,7 @@ function fromBase64Url(data: string): string {
 
 /** Hash of an invite link: plain `room=X`, or `i=<base64url>` with the token. */
 export function inviteHash(room: string, token?: string): string {
-  if (!token) return `room=${room}`;
+  if (!token) return `room=${encodeURIComponent(room)}`;
   return `i=${toBase64Url(new URLSearchParams({ room, t: token }).toString())}`;
 }
 

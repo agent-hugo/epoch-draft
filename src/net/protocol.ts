@@ -19,8 +19,12 @@ export const topics = {
   hand: (room: string, pid: string) => `${ROOMS_ROOT}/${room}/hand/${pid}`,
   action: (room: string, pid: string) => `${ROOMS_ROOT}/${room}/action/${pid}`,
   actionAll: (room: string) => `${ROOMS_ROOT}/${room}/action/+`,
-  /** Where a player is: outside the rooms, so it never touches a room's topics. */
-  presence: (pid: string) => `${PLAYERS_ROOT}/${pid}/presence`,
+  /**
+   * Whether a player is online in a room: kept with the player, outside the
+   * room, so it never touches the room's topics; one per room, so tabs in
+   * different rooms do not overwrite each other.
+   */
+  presence: (pid: string, room: string) => `${PLAYERS_ROOT}/${pid}/presence/${room}`,
   /** Full host state, so the host can resume after a reload. */
   hostState: (room: string) => `${ROOMS_ROOT}/${room}/host`,
   /** Set (retained) when a participant ends the game for everyone. */
@@ -66,13 +70,8 @@ export interface JoinMsg {
   civ?: string | null;
 }
 
-/** The room a player is in; the string 'offline' (also the will) when in none. */
-export type PresenceMsg = { room: string } | 'offline';
-
-/** Whether a presence message puts the player in this room. */
-export function presentIn(msg: unknown, room: string): boolean {
-  return typeof msg === 'object' && msg !== null && (msg as { room?: unknown }).room === room;
-}
+/** A player's presence in a room; 'offline' is also the will. */
+export type PresenceMsg = 'online' | 'offline';
 
 export interface ClosedMsg {
   /** Name of the player who ended the game. */
@@ -143,6 +142,10 @@ export function randomId(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Room code as typed: letters, digits, '-' and '_' only (nothing that would
+ * break a topic, such as '/', '+' or '#'), upper-cased.
+ */
 export function normalizeRoom(code: string): string {
-  return code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return code.toUpperCase().replace(/[^\p{L}\p{N}_-]/gu, '').slice(0, 32);
 }

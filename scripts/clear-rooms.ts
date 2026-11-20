@@ -1,8 +1,8 @@
 /**
  * Deletes rooms from the broker: clears every retained message under
  * `epoch-draft/room/<room>/`, including the `closed` marker, so nothing of the
- * room is left, and the presence of players that points at a deleted room or
- * says 'offline' (a missing presence means the same). Meant for rooms left
+ * room is left, and the presence of players in deleted rooms, as well as
+ * every 'offline' presence (a missing one means the same). Meant for rooms left
  * over from tests.
  *
  * Usage:
@@ -12,7 +12,7 @@
  *   --apply   actually delete; without it only lists the rooms
  */
 import mqtt from 'mqtt';
-import { PLAYERS_ROOT, presentIn, ROOMS_ROOT, roomOf } from '../src/net/protocol';
+import { PLAYERS_ROOT, ROOMS_ROOT, roomOf } from '../src/net/protocol';
 
 const url = process.env.MQTT_URL;
 const token = process.env.MQTT_TOKEN;
@@ -71,7 +71,7 @@ await client.subscribeAsync(filter, { qos: 1, nl: true, rh: 0 });
 client.off('message', onMessage);
 await client.unsubscribeAsync(filter);
 
-// Presence of players: where each one says they are.
+// Presence of players, by room: epoch-draft/player/<player>/presence/<room>.
 const presence = new Map<string, unknown>();
 const onPresence = (topic: string, payload: Buffer, packet: mqtt.IPublishPacket) => {
   if (!packet.retain || !payload.length) return;
@@ -81,12 +81,12 @@ const onPresence = (topic: string, payload: Buffer, packet: mqtt.IPublishPacket)
     presence.set(topic, undefined);
   }
 };
-const presenceFilter = `${PLAYERS_ROOT}/+/presence`;
+const presenceFilter = `${PLAYERS_ROOT}/+/presence/+`;
 client.on('message', onPresence);
 await client.subscribeAsync(presenceFilter, { qos: 1, nl: true, rh: 0 });
 client.off('message', onPresence);
 await client.unsubscribeAsync(presenceFilter);
-const stale = [...presence].filter(([, msg]) => [...rooms.keys()].some((code) => presentIn(msg, code)) || typeof msg !== 'object' || !msg);
+const stale = [...presence].filter(([t, msg]) => rooms.has(t.slice(t.lastIndexOf('/') + 1)) || msg !== 'online');
 console.log(`${apply ? 'clear' : 'would clear'} ${stale.length} stale player presences`);
 if (apply) await Promise.all(stale.map(([t]) => client.publishAsync(t, '', { qos: 1, retain: true })));
 

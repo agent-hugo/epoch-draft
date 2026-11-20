@@ -57,6 +57,10 @@ try {
   await invited.context().close();
 
   const guest = await open('Петя');
+  // The room code field takes letters, digits, '-' and '_' only.
+  await guest.getByPlaceholder('Код комнаты').pressSequentially('a/b #+c-1_');
+  const typed = await guest.getByPlaceholder('Код комнаты').inputValue();
+  if (typed !== 'ABC-1_') throw new Error(`the room code field let through ${typed}`);
   await guest.getByPlaceholder('Код комнаты').fill(room);
   await guest.getByRole('button', { name: 'Войти', exact: true }).click();
   await host.locator('.players li', { hasText: 'Петя' }).waitFor();

@@ -53,7 +53,7 @@ export function App() {
   }, []);
 
   const go = (code: string) => {
-    location.hash = code ? `room=${code}` : '';
+    location.hash = code ? `room=${encodeURIComponent(code)}` : '';
   };
 
   // Help is an overlay, so opening it does not unmount the room (and drop
@@ -221,7 +221,12 @@ function Home(props: { onEnter: (room: string) => void; onSettings: () => void; 
         <input
           placeholder="Код комнаты"
           value={code}
-          onInput={(e) => setCode(e.currentTarget.value.toUpperCase())}
+          onInput={(e) => {
+            // Disallowed characters never show up: the field is reset even if the code stays the same.
+            const v = normalizeRoom(e.currentTarget.value);
+            e.currentTarget.value = v;
+            setCode(v);
+          }}
           autoCapitalize="characters"
         />
         <button type="submit" disabled={!normalizeRoom(code)}>
@@ -254,7 +259,7 @@ function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; on
   useEffect(() => {
     const bus = new Bus(
       { url: settings.brokerUrl, token: settings.token },
-      { will: { topic: topics.presence(pid), payload: 'offline' } },
+      { will: { topic: topics.presence(pid, room), payload: 'offline' } },
     );
     const player = new Player(bus, room, pid, settings.name);
     const c: Conn = { bus, player };
