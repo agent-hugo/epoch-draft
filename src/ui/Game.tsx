@@ -214,7 +214,7 @@ function ActionText(props: { db: Db; state: GameState; e: LogEntry; pid: string;
   if (e.action === 'build')
     return (
       <>
-        построил(а) <b class={`chip t-${card.type}`}>{card.name}</b>
+        <b class={`chip t-${card.type}`}>{card.name}</b>
         {e.chain && <span class="muted"> · даром по цепочке</span>}
         {pay}
         <div class="small muted">{effectsText(db, card.effects)}</div>
