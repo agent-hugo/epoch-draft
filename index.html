@@ -5,6 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#1f2430" />
     <title>Epoch Draft</title>
+    <script>
+      // The page itself may be cached for a few minutes while a new release has
+      // already replaced the hashed bundle it points to. If a bundle fails to
+      // load, fetch the page past the cache and reload once (not more often
+      // than every 30 seconds, so a real outage does not loop).
+      addEventListener(
+        'error',
+        function (e) {
+          var el = e.target;
+          var src = el && (el.src || el.href);
+          if (!src || !/\/assets\//.test(src)) return;
+          try {
+            var last = +sessionStorage.getItem('reloadedAt') || 0;
+            if (Date.now() - last < 30000) return;
+            sessionStorage.setItem('reloadedAt', String(Date.now()));
+          } catch (_) {
+            return;
+          }
+          fetch(location.href, { cache: 'reload' }).then(
+            function () { location.reload(); },
+            function () { location.reload(); }
+          );
+        },
+        true
+      );
+    </script>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏛️</text></svg>" />
   </head>
   <body>
