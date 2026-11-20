@@ -74,8 +74,7 @@ function counterText(c: Counter): string {
   const subject = isCard ? `карту ${what}` : what;
   const self = c.who.includes('self');
   const nb = c.who.includes('left') || c.who.includes('right');
-  const whose =
-    self && nb ? 'у вас и соседей' : nb ? (c.what.includes('defeat') ? 'у обоих соседей (ваши не в счёт)' : 'у соседей') : 'у вас';
+  const whose = self && nb ? 'у вас и соседей' : nb ? 'у соседей' : 'у вас';
   return `за ${subject} ${whose}`;
 }
 
