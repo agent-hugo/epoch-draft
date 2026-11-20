@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
+import { MAX_PLAYERS } from '../engine/db';
 import { deleteRoom } from '../net/client';
 import { Bus } from '../net/mqtt';
 import { roomOf, topics, type LobbyMsg } from '../net/protocol';
@@ -11,6 +12,8 @@ interface RoomInfo {
   lobby: LobbyMsg;
   /** When the host last moved the game on (ms since epoch), if known. */
   time?: number;
+  /** The host has the room open right now. */
+  hostOnline?: boolean;
 }
 
 function ago(time: number): string {
@@ -24,7 +27,11 @@ function ago(time: number): string {
   return new Date(time).toLocaleDateString('ru');
 }
 
-/** Rooms on the broker, newest first, to enter or delete. */
+/**
+ * Rooms on the broker, newest first: open games of others to join (while
+ * their host is online), and the rooms the player is in, to enter or delete.
+ * Other rooms are not shown.
+ */
 export function RoomList({ onEnter }: { onEnter: (room: string) => void }) {
   const pid = settings.playerId;
   const [bus, setBus] = useState<Bus>();
@@ -40,11 +47,13 @@ export function RoomList({ onEnter }: { onEnter: (room: string) => void }) {
     const found = new Map<string, RoomInfo>();
     const closed = new Set<string>();
     const times = new Map<string, number>();
+    // Who is online in which room: `${room}/${player}`.
+    const online = new Set<string>();
     let loaded = false;
     const show = () => {
       if (!alive || !loaded) return;
       const list = [...found].filter(([code]) => !closed.has(code));
-      setRooms(new Map(list.map(([code, r]) => [code, { ...r, time: times.get(code) }])));
+      setRooms(new Map(list.map(([code, r]) => [code, { ...r, time: times.get(code), hostOnline: online.has(`${code}/${r.lobby.host}`) }])));
     };
     b.ready()
       .then(() =>
@@ -58,6 +67,12 @@ export function RoomList({ onEnter }: { onEnter: (room: string) => void }) {
           b.subscribe(topics.updatedAll, (t, p) => {
             if (typeof p === 'number' && p > 0) times.set(roomOf(t), p * 1000);
             else times.delete(roomOf(t));
+            show();
+          }),
+          b.subscribe(topics.presenceAll, (t, p) => {
+            const [, , pid, , room] = t.split('/');
+            if (p === 'online') online.add(`${room}/${pid}`);
+            else online.delete(`${room}/${pid}`);
             show();
           }),
           b.subscribe(topics.closedAll, (t, p) => {
@@ -98,59 +113,106 @@ export function RoomList({ onEnter }: { onEnter: (room: string) => void }) {
     onEnter(code);
   };
 
-  const list = rooms && [...rooms.values()].sort((a, b) => (b.time ?? 0) - (a.time ?? 0));
+  const sorted = rooms && [...rooms.values()].sort((a, b) => (b.time ?? 0) - (a.time ?? 0));
+  const isMine = (l: LobbyMsg) => l.host === pid || l.players.some((p) => p.id === pid);
+  const open = sorted?.filter(
+    ({ lobby: l, hostOnline }) => hostOnline && !isMine(l) && l.public && !l.started && !l.over && l.players.length < MAX_PLAYERS,
+  );
+  const mine = sorted?.filter(({ lobby }) => isMine(lobby));
+
+  const meta = ({ lobby, time }: RoomInfo) => {
+    const hostName = lobby.players.find((p) => p.id === lobby.host)?.name;
+    return (
+      <div class="small muted">
+        {lobby.players.length ? lobby.players.map((p) => p.name).join(', ') : 'игроков нет'}
+        {hostName && lobby.host !== pid && <> · хост {hostName}</>}
+        {worlds.length > 1 && <> · {getWorld(lobby.world).name}</>}
+        {time && <> · {ago(time)}</>}
+      </div>
+    );
+  };
+
   return (
     <section class="rooms">
-      <h2>Комнаты</h2>
       {error ? (
-        <p class="error small">{error}</p>
-      ) : !list ? (
-        <p class="muted small">Загружаем…</p>
-      ) : !list.length ? (
-        <p class="muted small">Комнат нет.</p>
+        <>
+          <h2>Комнаты</h2>
+          <p class="error small">{error}</p>
+        </>
+      ) : !sorted ? (
+        <>
+          <h2>Комнаты</h2>
+          <p class="muted small">Загружаем…</p>
+        </>
       ) : (
-        <ul class="room-list">
-          {list.map(({ code, lobby, time }) => {
-            const hostName = lobby.players.find((p) => p.id === lobby.host)?.name;
-            const busy = deleting.has(code);
-            return (
-              <li key={code}>
-                <div class="room-head">
-                  <b class="room-list-code">{code}</b>
-                  <span class="tag">{lobby.over ? 'игра окончена' : lobby.started ? 'идёт игра' : 'набор игроков'}</span>
-                  {lobby.host === pid && <span class="tag">вы хост</span>}
-                  {lobby.host !== pid && lobby.players.some((p) => p.id === pid) && <span class="tag">вы играете</span>}
-                </div>
-                <div class="small muted">
-                  {lobby.players.length ? lobby.players.map((p) => p.name).join(', ') : 'игроков нет'}
-                  {hostName && lobby.host !== pid && <> · хост {hostName}</>}
-                  {worlds.length > 1 && <> · {getWorld(lobby.world).name}</>}
-                  {time && <> · {ago(time)}</>}
-                </div>
-                <div class="row room-actions">
-                  <button aria-label={`Войти в комнату ${code}`} disabled={busy} onClick={() => enter(code, lobby)}>
-                    Войти
-                  </button>
-                  <button
-                    class="danger"
-                    aria-label={`Удалить комнату ${code}`}
-                    disabled={busy}
-                    onClick={() =>
-                      setAsk({
-                        text: `Удалить комнату ${code}? Игра в ней завершится у всех участников, всё её состояние будет удалено.`,
-                        ok: 'Удалить',
-                        danger: true,
-                        run: () => remove(code),
-                      })
-                    }
-                  >
-                    {busy ? 'Удаляем…' : 'Удалить'}
-                  </button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          <h2>Открытые игры</h2>
+          {!open!.length ? (
+            <p class="muted small">Сейчас никто не набирает игроков в открытую игру.</p>
+          ) : (
+            <ul class="room-list">
+              {open!.map((r) => (
+                <li key={r.code}>
+                  <div class="room-head">
+                    <b class="room-list-code">{r.code}</b>
+                    <span class="tag">
+                      {r.lobby.players.length}/{MAX_PLAYERS}
+                    </span>
+                  </div>
+                  {meta(r)}
+                  <div class="row room-actions">
+                    <button class="primary" aria-label={`Присоединиться к игре ${r.code}`} onClick={() => onEnter(r.code)}>
+                      Присоединиться
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <h2>Мои комнаты</h2>
+          {!mine!.length ? (
+            <p class="muted small">Комнат нет.</p>
+          ) : (
+            <ul class="room-list">
+              {mine!.map((r) => {
+                const { code, lobby } = r;
+                const busy = deleting.has(code);
+                return (
+                  <li key={code}>
+                    <div class="room-head">
+                      <b class="room-list-code">{code}</b>
+                      <span class="tag">{lobby.over ? 'игра окончена' : lobby.started ? 'идёт игра' : 'набор игроков'}</span>
+                      {lobby.public && !lobby.started && <span class="tag">открытая</span>}
+                      {lobby.host === pid && <span class="tag">вы хост</span>}
+                      {lobby.host !== pid && <span class="tag">вы играете</span>}
+                    </div>
+                    {meta(r)}
+                    <div class="row room-actions">
+                      <button aria-label={`Войти в комнату ${code}`} disabled={busy} onClick={() => enter(code, lobby)}>
+                        Войти
+                      </button>
+                      <button
+                        class="danger"
+                        aria-label={`Удалить комнату ${code}`}
+                        disabled={busy}
+                        onClick={() =>
+                          setAsk({
+                            text: `Удалить комнату ${code}? Игра в ней завершится у всех участников, всё её состояние будет удалено.`,
+                            ok: 'Удалить',
+                            danger: true,
+                            run: () => remove(code),
+                          })
+                        }
+                      >
+                        {busy ? 'Удаляем…' : 'Удалить'}
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
       )}
       {ask && <ConfirmDialog ask={ask} onClose={() => setAsk(undefined)} />}
     </section>

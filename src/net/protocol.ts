@@ -25,6 +25,7 @@ export const topics = {
    * different rooms do not overwrite each other.
    */
   presence: (pid: string, room: string) => `${PLAYERS_ROOT}/${pid}/presence/${room}`,
+  presenceAll: `${PLAYERS_ROOT}/+/presence/+`,
   /** A player's own setting, one topic each, kept for good (no expiry). */
   pref: (pid: string, key: PrefKey) => `${PLAYERS_ROOT}/${pid}/settings/${key}`,
   prefAll: (pid: string) => `${PLAYERS_ROOT}/${pid}/settings/+`,
@@ -68,6 +69,8 @@ export interface LobbyMsg {
   civMode?: CivMode;
   /** World id; missing means the default world. */
   world?: string;
+  /** Listed on everybody's home screen while players are gathered. */
+  public?: boolean;
 }
 
 export interface JoinMsg {

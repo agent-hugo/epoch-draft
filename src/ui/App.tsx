@@ -276,9 +276,17 @@ function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; on
         if (alive) setConn({ ...c });
       })
       .catch((e: Error) => alive && setError(`Не удалось подключиться к брокеру: ${e.message}`));
+    // A tab closed by the browser shuts the connection cleanly, so the broker
+    // does not send the will: say 'offline' while the page is going away.
+    const hide = () => void player.leave();
+    const show = (e: PageTransitionEvent) => e.persisted && player.rejoin();
+    addEventListener('pagehide', hide);
+    addEventListener('pageshow', show);
     return () => {
       alive = false;
       unsub();
+      removeEventListener('pagehide', hide);
+      removeEventListener('pageshow', show);
       void player.leave().finally(() => bus.end());
     };
   }, [room, pid]);
@@ -404,6 +412,21 @@ function Lobby(props: {
           добавить токен в ссылку
         </label>
       </div>
+      {host ? (
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={!!host.lobby.public}
+            onChange={(e) => {
+              host.setPublic(e.currentTarget.checked);
+              props.refresh();
+            }}
+          />
+          Открытая игра: видна всем в списке на главном экране
+        </label>
+      ) : (
+        lobby.public && <p class="muted small">Открытая игра: видна всем в списке на главном экране.</p>
+      )}
 
       <h2>
         Игроки <span class="muted">{lobby.players.length}/{MAX_PLAYERS}</span>

@@ -142,6 +142,14 @@ export class Host {
     void this.publishAll();
   }
 
+  /** Lists the room on everybody's home screen until the game starts, or stops listing it. */
+  setPublic(on: boolean): void {
+    if (this.lobby.started || !!this.lobby.public === on) return;
+    if (on) this.lobby.public = true;
+    else delete this.lobby.public;
+    void this.publishAll();
+  }
+
   /** Players who still have to pick a civilization before the game can start. */
   missingCivs(): LobbyPlayer[] {
     if (this.lobby.civMode !== 'manual') return [];

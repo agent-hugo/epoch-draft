@@ -125,6 +125,11 @@ export class Player {
     return this.bus.publish(topics.presence(this.id, this.room), 'offline' satisfies PresenceMsg, true);
   }
 
+  /** Says again that it is here, after leave() (a page restored from the back-forward cache). */
+  rejoin(): void {
+    void this.announce();
+  }
+
   /** The room is closed or this player was replaced: nothing to publish any more. */
   get gone(): boolean {
     return !!this.snapshot.closed || replacedByBot(this.snapshot, this.id);

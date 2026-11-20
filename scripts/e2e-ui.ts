@@ -99,8 +99,12 @@ try {
   await guest.getByPlaceholder('Код комнаты').pressSequentially('a/b #+c-1_');
   const typed = await guest.getByPlaceholder('Код комнаты').inputValue();
   if (typed !== 'ABC-1_') throw new Error(`the room code field let through ${typed}`);
-  await guest.getByPlaceholder('Код комнаты').fill(room);
-  await guest.getByRole('button', { name: 'Войти', exact: true }).click();
+  // A private room is not listed; once the host opens it, it shows up among open games.
+  await guest.getByRole('heading', { name: 'Мои комнаты' }).waitFor();
+  const join = guest.getByRole('button', { name: `Присоединиться к игре ${room}` });
+  if (await join.isVisible()) throw new Error('a private room is listed');
+  await host.getByRole('checkbox', { name: /^Открытая игра/ }).check();
+  await join.click({ timeout: 10000 });
   await host.locator('.players li', { hasText: 'Петя' }).waitFor();
   await host.getByRole('button', { name: 'Добавить бота' }).click();
   await host.locator('.players li', { hasText: 'Бот' }).waitFor();
