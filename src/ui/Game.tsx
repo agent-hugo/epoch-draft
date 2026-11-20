@@ -1,7 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { TURNS_PER_EPOCH, type Db } from '../engine/db';
-import { coinsNeeded, leftOf, production, rightOf, type PaymentOption } from '../engine/payment';
+import { coinsNeeded, leftOf, playerEffects, production, rightOf, type PaymentOption } from '../engine/payment';
 import { DEFEAT_POINTS, handOptions, nextStageCost, SELL_COINS, VICTORY_POINTS, type CardOptions } from '../engine/rules';
 import { military, ranking, scoreGame, scorePlayer } from '../engine/scoring';
 import type { CardDef, Choice, Cost, Epoch, GameState, LogEntry, PlayerState, ScoreBreakdown } from '../engine/types';
@@ -12,7 +12,7 @@ import { ConfirmDialog, type Ask } from './dialog';
 import { Reference } from './Reference';
 import { SeatList } from './SeatList';
 import { settings } from './storage';
-import { costText, effectsText, EPOCH_NAME, joined, resChoice, resList, TYPE_NAME, TYPE_ORDER } from './format';
+import { costText, effectsText, EPOCH_NAME, Icon, joined, resChoice, resList, TYPE_NAME, TYPE_ORDER } from './format';
 
 type Tab = 'hand' | 'city' | 'others' | 'help' | 'settings';
 
@@ -102,7 +102,7 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
             <span>{scorePlayer(db, view, i).total}⭐</span>
           </div>
         </div>
-        <Neighbours state={view} i={i} />
+        <Neighbours db={db} state={view} i={i} />
       </header>
       {!snap.connected && <div class="banner warn">Нет связи с брокером, переподключаемся…</div>}
       {snap.connected && !hostOnline && <div class="banner warn">Хост не в сети: игра продолжится, когда он вернётся.</div>}
@@ -438,20 +438,72 @@ function GameSettings(props: {
  * The neighbours of player `i` and where the hand goes after this turn:
  * epochs I and III pass left, II right; the last turn's card is discarded.
  */
-function Neighbours({ state, i }: { state: GameState; i: number }) {
+function Neighbours({ db, state, i }: { db: Db; state: GameState; i: number }) {
   const n = state.players.length;
   const last = state.turn >= TURNS_PER_EPOCH;
   const toRight = state.epoch === 2;
+  const left = leftOf(n, i);
+  const right = rightOf(n, i);
+  // A tap opens every icon of both neighbours; the next tap anywhere closes them.
+  const [open, setOpen] = useState(false);
+  const self = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: Event) => !self.current?.contains(e.target as Node) && setOpen(false);
+    document.addEventListener('click', close, true);
+    return () => document.removeEventListener('click', close, true);
+  }, [open]);
   return (
-    <div class="neighbours small">
+    <button
+      ref={self}
+      type="button"
+      class={`neighbours small ${open ? 'open' : ''}`}
+      aria-expanded={open}
+      onClick={() => setOpen((o) => !o)}
+    >
       <span class={`nb left ${!last && !toRight ? 'next' : ''}`} title="Сосед слева">
-        ◀ {state.players[leftOf(n, i)]!.name}
+        ◀ {state.players[left]!.name}
       </span>
       <span class="pass-to">{last ? 'последний ход' : toRight ? 'далее ▶' : '◀ далее'}</span>
       <span class={`nb right ${!last && toRight ? 'next' : ''}`} title="Сосед справа">
-        {state.players[rightOf(n, i)]!.name} ▶
+        {state.players[right]!.name} ▶
       </span>
-    </div>
+      {open && (
+        <>
+          <PlayerIcons db={db} state={state} k={left} />
+          <PlayerIcons db={db} state={state} k={right} />
+        </>
+      )}
+    </button>
+  );
+}
+
+/** Everything a player has, as bare icons: points, coins, army, monument, production, science. */
+function PlayerIcons({ db, state, k }: { db: Db; state: GameState; k: number }) {
+  const p = state.players[k]!;
+  const schools = new Map<string, number>();
+  for (const { effect } of playerEffects(db, p))
+    if (effect.kind === 'science') schools.set(effect.school, (schools.get(effect.school) ?? 0) + 1);
+  const prod = production(db, p);
+  return (
+    <span class="nb-icons">
+      <span>{scorePlayer(db, state, k).total}⭐</span>
+      <span>{p.coins}🪙</span>
+      <span>{military(db, state, k)}⚔️</span>
+      <span>
+        {p.stages}/{db.civ(p.civ).monument.stages.length}🏛️
+      </span>
+      {resList(db, prod.fixed)}
+      {prod.choices.map((c) => (
+        <span>{resChoice(db, c)}</span>
+      ))}
+      {[...schools].map(([id, count]) => (
+        <span key={id}>
+          {count > 1 && count}
+          {id === 'any' ? joined([...db.schools.values()].map((x) => <Icon def={x} />), '/') : <Icon def={db.schools.get(id)} />}
+        </span>
+      ))}
+    </span>
   );
 }
 

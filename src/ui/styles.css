@@ -631,16 +631,41 @@ a {
   align-items: center;
 }
 .neighbours {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
+  row-gap: 6px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  text-align: left;
+}
+.neighbours.open {
+  border-color: var(--accent);
 }
 .neighbours .nb {
-  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+/* under each neighbour: the left one's icons in the left column, the right one's in the right */
+.nb-icons {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 2px 8px;
+  align-self: start;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.nb-icons:last-child {
+  grid-column: 3;
+  justify-content: flex-end;
 }
 .neighbours .right {
   text-align: right;
