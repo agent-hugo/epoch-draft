@@ -24,7 +24,7 @@ console.log('room', room);
 
 const buses: Bus[] = [];
 function bus(pid: string) {
-  const b = new Bus(cfg, { will: { topic: topics.presence(room, pid), payload: 'offline' } });
+  const b = new Bus(cfg, { will: { topic: topics.presence(pid), payload: 'offline' } });
   buses.push(b);
   return b;
 }
@@ -80,7 +80,7 @@ for (const t of process.env.KEEP ? [] : [
     topics.hand(room, id),
     topics.action(room, id),
     topics.join(room, id),
-    topics.presence(room, id),
+    topics.presence(id),
   ]),
 ]) {
   await hostBus.publish(t, null, true);

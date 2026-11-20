@@ -1,7 +1,9 @@
 /**
  * Deletes rooms from the broker: clears every retained message under
  * `epoch-draft/room/<room>/`, including the `closed` marker, so nothing of the
- * room is left. Meant for rooms left over from tests.
+ * room is left, and the presence of players that points at a deleted room or
+ * says 'offline' (a missing presence means the same). Meant for rooms left
+ * over from tests.
  *
  * Usage:
  *   MQTT_URL=wss://... MQTT_TOKEN=... npm run clear-rooms -- [--apply] [ROOM...]
@@ -10,7 +12,7 @@
  *   --apply   actually delete; without it only lists the rooms
  */
 import mqtt from 'mqtt';
-import { ROOMS_ROOT, roomOf } from '../src/net/protocol';
+import { PLAYERS_ROOT, presentIn, ROOMS_ROOT, roomOf } from '../src/net/protocol';
 
 const url = process.env.MQTT_URL;
 const token = process.env.MQTT_TOKEN;
@@ -68,6 +70,25 @@ client.on('message', onMessage);
 await client.subscribeAsync(filter, { qos: 1, nl: true, rh: 0 });
 client.off('message', onMessage);
 await client.unsubscribeAsync(filter);
+
+// Presence of players: where each one says they are.
+const presence = new Map<string, unknown>();
+const onPresence = (topic: string, payload: Buffer, packet: mqtt.IPublishPacket) => {
+  if (!packet.retain || !payload.length) return;
+  try {
+    presence.set(topic, JSON.parse(payload.toString()));
+  } catch {
+    presence.set(topic, undefined);
+  }
+};
+const presenceFilter = `${PLAYERS_ROOT}/+/presence`;
+client.on('message', onPresence);
+await client.subscribeAsync(presenceFilter, { qos: 1, nl: true, rh: 0 });
+client.off('message', onPresence);
+await client.unsubscribeAsync(presenceFilter);
+const stale = [...presence].filter(([, msg]) => [...rooms.keys()].some((code) => presentIn(msg, code)) || typeof msg !== 'object' || !msg);
+console.log(`${apply ? 'clear' : 'would clear'} ${stale.length} stale player presences`);
+if (apply) await Promise.all(stale.map(([t]) => client.publishAsync(t, '', { qos: 1, retain: true })));
 
 let cleared = 0;
 for (const [code, room] of [...rooms].sort(([a], [b]) => a.localeCompare(b))) {

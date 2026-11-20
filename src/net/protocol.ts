@@ -3,7 +3,7 @@ import type { Choice, GameState, PlayerState } from '../engine/types';
 export const TOPIC_ROOT = 'epoch-draft';
 /** Rooms live under `epoch-draft/room/<room>/`. */
 export const ROOMS_ROOT = `${TOPIC_ROOT}/room`;
-/** Reserved for topics of a player across rooms: `epoch-draft/player/<player>/`. */
+/** Topics of a player across rooms: `epoch-draft/player/<player>/`. */
 export const PLAYERS_ROOT = `${TOPIC_ROOT}/player`;
 
 export const topics = {
@@ -19,8 +19,8 @@ export const topics = {
   hand: (room: string, pid: string) => `${ROOMS_ROOT}/${room}/hand/${pid}`,
   action: (room: string, pid: string) => `${ROOMS_ROOT}/${room}/action/${pid}`,
   actionAll: (room: string) => `${ROOMS_ROOT}/${room}/action/+`,
-  presence: (room: string, pid: string) => `${ROOMS_ROOT}/${room}/presence/${pid}`,
-  presenceAll: (room: string) => `${ROOMS_ROOT}/${room}/presence/+`,
+  /** Where a player is: outside the rooms, so it never touches a room's topics. */
+  presence: (pid: string) => `${PLAYERS_ROOT}/${pid}/presence`,
   /** Full host state, so the host can resume after a reload. */
   hostState: (room: string) => `${ROOMS_ROOT}/${room}/host`,
   /** Set (retained) when a participant ends the game for everyone. */
@@ -64,6 +64,14 @@ export interface JoinMsg {
   name: string;
   /** Civilization the player wants (manual mode); null drops the pick, missing keeps it. */
   civ?: string | null;
+}
+
+/** The room a player is in; the string 'offline' (also the will) when in none. */
+export type PresenceMsg = { room: string } | 'offline';
+
+/** Whether a presence message puts the player in this room. */
+export function presentIn(msg: unknown, room: string): boolean {
+  return typeof msg === 'object' && msg !== null && (msg as { room?: unknown }).room === room;
 }
 
 export interface ClosedMsg {

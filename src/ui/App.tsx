@@ -254,7 +254,7 @@ function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; on
   useEffect(() => {
     const bus = new Bus(
       { url: settings.brokerUrl, token: settings.token },
-      { will: { topic: topics.presence(room, pid), payload: 'offline' } },
+      { will: { topic: topics.presence(pid), payload: 'offline' } },
     );
     const player = new Player(bus, room, pid, settings.name);
     const c: Conn = { bus, player };

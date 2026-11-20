@@ -1,13 +1,14 @@
 import type { Choice } from '../engine/types';
 import type { Bus } from './mqtt';
 import {
-  lastLevel,
+  presentIn,
   topics,
   type ActionMsg,
   type ClosedMsg,
   type HandMsg,
   type JoinMsg,
   type LobbyMsg,
+  type PresenceMsg,
   type PublicState,
 } from './protocol';
 
@@ -42,8 +43,10 @@ export class Player {
   snapshot: ClientSnapshot = { presence: {}, connected: false };
   private listeners = new Set<(s: ClientSnapshot) => void>();
   private cleared = false;
-  /** This connection has said 'online' (and joined, if needed). */
+  /** This connection has said it is in the room (and joined, if needed). */
   private announced = false;
+  /** Players whose presence is watched. */
+  private watched = new Set<string>();
 
   constructor(
     private bus: Bus,
@@ -67,19 +70,28 @@ export class Player {
     });
     this.bus.subscribe(topics.lobby(this.room), (_t, p) => {
       this.update({ lobby: (p as LobbyMsg) ?? undefined });
+      this.watchPresence();
       if (replacedByBot(this.snapshot, this.id)) void this.clearOwn();
       else void this.announce();
     });
     this.bus.subscribe(topics.publicState(this.room), (_t, p) => this.update({ pub: (p as PublicState) ?? undefined }));
     this.bus.subscribe(topics.hand(this.room, this.id), (_t, p) => this.update({ hand: (p as HandMsg) ?? undefined }));
-    this.bus.subscribe(topics.presenceAll(this.room), (t, p) =>
-      this.update({ presence: { ...this.snapshot.presence, [lastLevel(t)]: p === 'online' } }),
-    );
     if (this.bus.online) this.update({ connected: true });
   }
 
+  /** Follows where the lobby's players are: online here or not. */
+  private watchPresence() {
+    for (const p of this.snapshot.lobby?.players ?? []) {
+      if (p.bot || this.watched.has(p.id)) continue;
+      this.watched.add(p.id);
+      void this.bus.subscribe(topics.presence(p.id), (_t, msg) =>
+        this.update({ presence: { ...this.snapshot.presence, [p.id]: presentIn(msg, this.room) } }),
+      );
+    }
+  }
+
   /**
-   * Says 'online' and joins once the lobby is known, and only where that
+   * Says it is in the room and joins once the lobby is known, and only where that
    * means something: not in a finished game, not as an onlooker of a game
    * already under way. The join is sent only if the lobby lacks this player
    * under this name, so merely opening a room does not rewrite it.
@@ -90,15 +102,16 @@ export class Player {
     const me = lobby.players.find((p) => p.id === this.id);
     if (lobby.started && !me) return;
     this.announced = true;
-    await this.bus.publish(topics.presence(this.room, this.id), 'online', true);
+    await this.bus.publish(topics.presence(this.id), { room: this.room } satisfies PresenceMsg, true);
     if (me?.name !== this.name)
       await this.bus.publish(topics.join(this.room, this.id), { name: this.name } satisfies JoinMsg, true);
   }
 
-  /** Leaving the room: 'offline', if 'online' was said. */
+  /** Leaving the room: 'offline', if this player said it was here. */
   leave(): Promise<void> {
-    if (!this.announced || this.gone) return Promise.resolve();
-    return this.bus.publish(topics.presence(this.room, this.id), 'offline', true);
+    if (!this.announced) return Promise.resolve();
+    this.announced = false;
+    return this.bus.publish(topics.presence(this.id), 'offline' satisfies PresenceMsg, true);
   }
 
   /** The room is closed or this player was replaced: nothing to publish any more. */
@@ -142,8 +155,8 @@ export class Player {
     if (this.cleared) return;
     this.cleared = true;
     const r = this.room;
-    const own = [topics.join(r, this.id), topics.action(r, this.id), topics.hand(r, this.id), topics.presence(r, this.id)];
-    await Promise.all(own.map((t) => this.bus.publish(t, null, true)));
+    const own = [topics.join(r, this.id), topics.action(r, this.id), topics.hand(r, this.id)];
+    await Promise.all([...own.map((t) => this.bus.publish(t, null, true)), this.leave()]);
   }
 
   subscribe(fn: (s: ClientSnapshot) => void): () => void {
