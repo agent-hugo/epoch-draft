@@ -154,15 +154,15 @@ try {
   await host.getByRole('radio', { name: /Выбор игроков/ }).click();
   await host.getByRole('button', { name: /^Египет/ }).click();
   await guest.getByRole('button', { name: /^Египет/ }).and(guest.locator(':disabled')).waitFor();
-  // With the host away a pick waits for it, shown as such, and applies when the host is back.
+  // With the leader's phone away (it runs the game) a pick waits, shown as such, and applies when it is back.
   await host.getByRole('button', { name: 'Выйти' }).click();
-  await guest.getByText(/Хост \(Мама\) сейчас не в комнате/).waitFor();
+  await guest.getByText(/Игру считает телефон ведущего \(Мама\), сейчас не в сети/).waitFor();
   await guest.getByRole('button', { name: /^Рим/ }).click();
-  await guest.getByRole('button', { name: /^Рим.*ждём хоста/ }).waitFor();
+  await guest.getByRole('button', { name: /^Рим.*ждём подтверждения/ }).waitFor();
   await host.getByRole('button', { name: `Войти в комнату ${room}` }).click();
   await host.locator('.players li', { hasText: 'Рим' }).waitFor();
   await guest.getByRole('button', { name: /^Рим.*ваша/ }).waitFor();
-  check(!(await guest.getByText(/сейчас не в комнате/).isVisible()), 'the notice must go when the host is back');
+  check(!(await guest.getByText(/сейчас не в сети/).isVisible()), 'the notice must go when the leader is back');
   check(await host.getByRole('button', { name: 'Начать игру' }).isDisabled(), 'start must wait for every pick');
   await host.getByText(/Ещё не выбрали цивилизацию: Вася/).waitFor();
   await shot(guest, 'e0-civ-pick');
@@ -279,7 +279,7 @@ try {
   await host.locator('.players li', { hasText: 'Мама' }).waitFor();
   await host.getByRole('button', { name: 'Выйти' }).click();
   const item = host.locator('.room-list li', { hasText: room2 });
-  await item.getByText('вы хост').waitFor({ timeout: 10000 });
+  await item.getByText('вы ведущий').waitFor({ timeout: 10000 });
   // A new room is stamped by its host: the list shows when it was updated.
   await item.getByText('только что').waitFor({ timeout: 5000 });
   await shot(host, 'e5-rooms');

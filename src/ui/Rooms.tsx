@@ -10,10 +10,10 @@ import { settings } from './storage';
 interface RoomInfo {
   code: string;
   lobby: LobbyMsg;
-  /** When the host last moved the game on (ms since epoch), if known. */
+  /** When the engine last moved the game on (ms since epoch), if known. */
   time?: number;
-  /** The host has the room open right now. */
-  hostOnline?: boolean;
+  /** The engine of the room runs right now: the leader's phone or a server. */
+  engineOnline?: boolean;
 }
 
 function ago(time: number): string {
@@ -29,7 +29,7 @@ function ago(time: number): string {
 
 /**
  * Rooms on the broker, newest first: open games of others to join (while
- * their host is online), and the rooms the player is in or has opened on
+ * their engine is online), and the rooms the player is in or has opened on
  * this device, to enter or delete. Other rooms are not shown.
  */
 export function RoomList({ onEnter }: { onEnter: (room: string) => void }) {
@@ -49,11 +49,15 @@ export function RoomList({ onEnter }: { onEnter: (room: string) => void }) {
     const times = new Map<string, number>();
     // Who is online in which room: `${room}/${player}`.
     const online = new Set<string>();
+    // Game servers online.
+    const servers = new Set<string>();
+    const running = (code: string, l: LobbyMsg) =>
+      l.engine === l.owner ? online.has(`${code}/${l.owner}`) : servers.has(l.engine);
     let loaded = false;
     const show = () => {
       if (!alive || !loaded) return;
       const list = [...found].filter(([code]) => !closed.has(code));
-      setRooms(new Map(list.map(([code, r]) => [code, { ...r, time: times.get(code), hostOnline: online.has(`${code}/${r.lobby.host}`) }])));
+      setRooms(new Map(list.map(([code, r]) => [code, { ...r, time: times.get(code), engineOnline: running(code, r.lobby) }])));
     };
     b.ready()
       .then(() =>
@@ -73,6 +77,12 @@ export function RoomList({ onEnter }: { onEnter: (room: string) => void }) {
             const [, , pid, , room] = t.split('/');
             if (p === 'online') online.add(`${room}/${pid}`);
             else online.delete(`${room}/${pid}`);
+            show();
+          }),
+          b.subscribe(topics.serverPresenceAll, (t, p) => {
+            const code = t.split('/')[2]!;
+            if (p === 'online') servers.add(code);
+            else servers.delete(code);
             show();
           }),
           b.subscribe(topics.closedAll, (t, p) => {
@@ -108,26 +118,21 @@ export function RoomList({ onEnter }: { onEnter: (room: string) => void }) {
     );
   };
 
-  const enter = (code: string, lobby: LobbyMsg) => {
-    // The host role lives in this device's storage; bring it back if it was lost.
-    if (lobby.host === pid) settings.setHost(code);
-    onEnter(code);
-  };
 
   const sorted = rooms && [...rooms.values()].sort((a, b) => (b.time ?? 0) - (a.time ?? 0));
   const visited = new Set(settings.visited);
-  const plays = (l: LobbyMsg) => l.host === pid || l.players.some((p) => p.id === pid);
+  const plays = (l: LobbyMsg) => l.owner === pid || l.players.some((p) => p.id === pid);
   const open = sorted?.filter(
-    ({ code, lobby: l, hostOnline }) => hostOnline && !plays(l) && !visited.has(code) && l.public && !l.started && !l.over && l.players.length < MAX_PLAYERS,
+    ({ code, lobby: l, engineOnline }) => engineOnline && !plays(l) && !visited.has(code) && l.public && !l.started && !l.over && l.players.length < MAX_PLAYERS,
   );
   const mine = sorted?.filter(({ code, lobby }) => plays(lobby) || visited.has(code));
 
   const meta = ({ lobby, time }: RoomInfo) => {
-    const hostName = lobby.players.find((p) => p.id === lobby.host)?.name;
+    const ownerName = lobby.players.find((p) => p.id === lobby.owner)?.name;
     return (
       <div class="small muted">
         {lobby.players.length ? lobby.players.map((p) => p.name).join(', ') : 'игроков нет'}
-        {hostName && lobby.host !== pid && <> · хост {hostName}</>}
+        {ownerName && lobby.owner !== pid && <> · ведущий {ownerName}</>}
         {worlds.length > 1 && <> · {getWorld(lobby.world).name}</>}
         {time && <> · {ago(time)}</>}
       </div>
@@ -185,12 +190,12 @@ export function RoomList({ onEnter }: { onEnter: (room: string) => void }) {
                       <b class="room-list-code">{code}</b>
                       <span class="tag">{lobby.over ? 'игра окончена' : lobby.started ? 'идёт игра' : 'набор игроков'}</span>
                       {lobby.public && !lobby.started && <span class="tag">открытая</span>}
-                      {lobby.host === pid && <span class="tag">вы хост</span>}
-                      {lobby.host !== pid && plays(lobby) && <span class="tag">вы играете</span>}
+                      {lobby.owner === pid && <span class="tag">вы ведущий</span>}
+                      {lobby.owner !== pid && plays(lobby) && <span class="tag">вы играете</span>}
                     </div>
                     {meta(r)}
                     <div class="row room-actions">
-                      <button aria-label={`Войти в комнату ${code}`} disabled={busy} onClick={() => enter(code, lobby)}>
+                      <button aria-label={`Войти в комнату ${code}`} disabled={busy} onClick={() => onEnter(code)}>
                         Войти
                       </button>
                       <button

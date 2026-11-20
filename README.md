@@ -42,5 +42,12 @@ MQTT_URL=wss://... MQTT_TOKEN=... npm run retain-expiry -- [--apply] [--days 7] 
 MQTT_URL=wss://... MQTT_TOKEN=... npm run clear-rooms -- [--apply] [КОД...]
 ```
 
+Сервер игр без браузера, например на домашнем компьютере (как вкладка с
+`#serve`: считает игры, которые ведущие передали на его код):
+
+```sh
+MQTT_TOKEN=... npm run serve -- КОД   # MQTT_URL по умолчанию wss://mqtt.flespi.io
+```
+
 Чтобы играть, нужны адрес MQTT-брокера с WebSocket (TLS) и токен; их вводят в
 настройках приложения.

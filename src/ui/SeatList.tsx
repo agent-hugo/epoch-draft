@@ -8,14 +8,14 @@ interface Seat {
 
 /**
  * The players in seat order: everyone sits left of the one below and the
- * last one left of the first. The host can switch the list to a drag mode
+ * last one left of the first. The leader can switch the list to a drag mode
  * to change the order; the new order is applied when the mode is left.
  */
 export function SeatList<P extends Seat>(props: {
   players: P[];
   /** Row contents outside the drag mode. */
   row: (p: P) => ComponentChildren;
-  /** Set for the host: the list can be reordered. */
+  /** Set for the leader: the list can be reordered. */
   onApply?: (ids: string[]) => void;
 }) {
   const { players, onApply } = props;

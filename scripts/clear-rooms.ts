@@ -2,7 +2,8 @@
  * Deletes rooms from the broker: clears every retained message under
  * `epoch-draft/room/<room>/`, including the `closed` marker, so nothing of the
  * room is left, and the presence of players in deleted rooms, as well as
- * every 'offline' presence (a missing one means the same). Meant for rooms left
+ * every 'offline' presence of players and game servers (a missing one means
+ * the same). Meant for rooms left
  * over from tests.
  *
  * Usage:
@@ -12,7 +13,7 @@
  *   --apply   actually delete; without it only lists the rooms
  */
 import mqtt from 'mqtt';
-import { PLAYERS_ROOT, ROOMS_ROOT, roomOf } from '../src/net/protocol';
+import { PLAYERS_ROOT, ROOMS_ROOT, roomOf, topics } from '../src/net/protocol';
 
 const url = process.env.MQTT_URL;
 const token = process.env.MQTT_TOKEN;
@@ -83,11 +84,13 @@ const onPresence = (topic: string, payload: Buffer, packet: mqtt.IPublishPacket)
 };
 const presenceFilter = `${PLAYERS_ROOT}/+/presence/+`;
 client.on('message', onPresence);
-await client.subscribeAsync(presenceFilter, { qos: 1, nl: true, rh: 0 });
+await client.subscribeAsync([presenceFilter, topics.serverPresenceAll], { qos: 1, nl: true, rh: 0 });
 client.off('message', onPresence);
-await client.unsubscribeAsync(presenceFilter);
-const stale = [...presence].filter(([t, msg]) => rooms.has(t.slice(t.lastIndexOf('/') + 1)) || msg !== 'online');
-console.log(`${apply ? 'clear' : 'would clear'} ${stale.length} stale player presences`);
+await client.unsubscribeAsync([presenceFilter, topics.serverPresenceAll]);
+const isServer = (t: string) => !t.startsWith(`${PLAYERS_ROOT}/`);
+const stale = [...presence].filter(([t, msg]) => msg !== 'online' || (!isServer(t) && rooms.has(t.slice(t.lastIndexOf('/') + 1))));
+const staleServers = stale.filter(([t]) => isServer(t)).length;
+console.log(`${apply ? 'clear' : 'would clear'} ${stale.length - staleServers} stale player presences, ${staleServers} offline servers`);
 if (apply) await Promise.all(stale.map(([t]) => client.publishAsync(t, '', { qos: 1, retain: true })));
 
 let cleared = 0;

@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { MAX_PLAYERS, MIN_PLAYERS, type Db } from '../engine/db';
-import { Player, replacedByBot, type ClientSnapshot } from '../net/client';
+import { engineOnline, Player, replacedByBot, type ClientSnapshot } from '../net/client';
 import { Host } from '../net/host';
 import { Bus } from '../net/mqtt';
-import { normalizeRoom, randomRoomCode, topics, type LobbyMsg } from '../net/protocol';
+import { canStart, missingCivs, normalizeRoom, randomRoomCode, topics, type LobbyMsg } from '../net/protocol';
 import { getWorld, worldDb, worlds } from '../worlds';
 import { effectsText, joined, ResIcon } from './format';
 import { Game } from './Game';
 import { Reference } from './Reference';
 import { decodeInvite, inviteHash } from './invite';
+import { EnginePanel, engineWhere } from './EnginePanel';
 import { RoomList } from './Rooms';
+import { ServerPage } from './ServerPage';
 import { SeatList } from './SeatList';
 import { settings } from './storage';
 
@@ -41,12 +43,14 @@ export function App() {
   // that the back button leaves them instead of returning to an earlier page.
   const [setup, setSetup] = useState(() => !settings.token || !settings.name);
   const [inSettings, setInSettings] = useState(() => readHash().has('settings'));
+  const [serve, setServe] = useState(() => readHash().has('serve'));
 
   useEffect(() => {
     const onHash = () => {
       consumeTokenFromHash();
       setRoom(normalizeRoom(readHash().get('room') ?? ''));
       setInSettings(readHash().has('settings'));
+      setServe(readHash().has('serve'));
     };
     addEventListener('hashchange', onHash);
     return () => removeEventListener('hashchange', onHash);
@@ -81,6 +85,7 @@ export function App() {
   let screen;
   if (setup || inSettings)
     screen = <Settings onDone={closeSettings} onBack={setup ? undefined : closeSettings} onHelp={onHelp} />;
+  else if (serve) screen = <ServerPage />;
   else if (!room) screen = <Home onEnter={go} onSettings={openSettings} onHelp={onHelp} />;
   else screen = <Room key={room} room={room} onLeave={() => go('')} onHelp={onHelp} />;
   return (
@@ -236,6 +241,9 @@ function Home(props: { onEnter: (room: string) => void; onSettings: () => void; 
       <button class="link" onClick={onSettings}>
         Настройки
       </button>
+      <a class="link" href="#serve">
+        Сервер игр на этом устройстве
+      </a>
       <HelpButton onHelp={props.onHelp} />
       <RoomList onEnter={onEnter} />
     </main>
@@ -245,8 +253,6 @@ function Home(props: { onEnter: (room: string) => void; onSettings: () => void; 
 interface Conn {
   bus: Bus;
   player: Player;
-  host?: Host;
-  error?: string;
 }
 
 function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; onHelp: (world?: string) => void }) {
@@ -254,7 +260,6 @@ function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; on
   const [conn, setConn] = useState<Conn>();
   const [snap, setSnap] = useState<ClientSnapshot>();
   const [error, setError] = useState<string>();
-  const [, force] = useState(0);
 
   useEffect(() => {
     settings.visit(room);
@@ -269,11 +274,12 @@ function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; on
     bus
       .ready()
       .then(async () => {
-        if (settings.isHost(room)) {
-          c.host = new Host(worldDb, bus, room, pid);
-          await c.host.start();
-        }
         player.start();
+        // A room created on this device: name the engine that runs it.
+        if (settings.isHost(room)) {
+          await player.claim();
+          settings.clearHost(room);
+        }
         if (alive) setConn({ ...c });
       })
       .catch((e: Error) => alive && setError(`Не удалось подключиться к брокеру: ${e.message}`));
@@ -296,6 +302,16 @@ function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; on
   useEffect(() => {
     if (closed) settings.clearHost(room);
   }, [closed, room]);
+
+  // The game runs on this phone while the leader keeps it here.
+  const engine = snap?.engine;
+  const runHere = !!conn && !closed && engine?.id === pid && engine.owner === pid;
+  useEffect(() => {
+    if (!runHere || !conn) return;
+    const host = new Host(worldDb, conn.bus, room, pid, pid);
+    void host.start();
+    return () => host.retire();
+  }, [runHere, conn, room, pid]);
 
   const online = !!snap?.connected && !error;
   const dot = <span class={`conn-dot ${online ? 'on' : 'off'}`} title={online ? 'Связь с брокером есть' : 'Нет связи с брокером'} />;
@@ -324,7 +340,7 @@ function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; on
     body = (
       <main class="screen narrow">
         <h1>Вас заменили ботом</h1>
-        <p class="muted">Хост отдал ваше место в комнате {room} боту, игра продолжается без вас.</p>
+        <p class="muted">Ведущий отдал ваше место в комнате {room} боту, игра продолжается без вас.</p>
         <button class="primary" onClick={onLeave}>
           В меню
         </button>
@@ -333,7 +349,7 @@ function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; on
   else if (!conn || !snap) body = <main class="screen narrow muted">Подключение…</main>;
   else if (snap.lobby?.started && snap.pub)
     body = (
-      <Game db={worldDb(snap.pub.world ?? snap.lobby.world)} room={room} pid={pid} snap={snap} player={conn.player} host={conn.host} onLeave={onLeave} />
+      <Game db={worldDb(snap.pub.world ?? snap.lobby.world)} room={room} pid={pid} snap={snap} player={conn.player} onLeave={onLeave} />
     );
   else
     body = (
@@ -341,11 +357,9 @@ function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; on
         room={room}
         pid={pid}
         snap={snap}
-        host={conn.host}
         player={conn.player}
         onLeave={onLeave}
         onHelp={onHelp}
-        refresh={() => force((x) => x + 1)}
       />
     );
 
@@ -361,13 +375,11 @@ function Lobby(props: {
   room: string;
   pid: string;
   snap: ClientSnapshot;
-  host?: Host;
   player: Player;
   onLeave: () => void;
   onHelp: (world?: string) => void;
-  refresh: () => void;
 }) {
-  const { room, pid, snap, host } = props;
+  const { room, pid, snap, player } = props;
   const [withToken, setWithToken] = useState(false);
   const [copied, setCopied] = useState(false);
   const lobby = snap.lobby;
@@ -378,7 +390,7 @@ function Lobby(props: {
   if (!lobby)
     return (
       <main class="screen narrow">
-        <p class="muted">Ждём хоста комнаты {room}…</p>
+        <p class="muted">Ждём комнату {room}…</p>
         <p class="muted small">Если комнаты не существует, проверьте код.</p>
         <button onClick={props.onLeave}>Назад</button>
         <HelpButton onHelp={props.onHelp} />
@@ -386,11 +398,13 @@ function Lobby(props: {
     );
 
   const inLobby = lobby.players.some((p) => p.id === pid);
-  const hostName = lobby.players.find((p) => p.id === lobby.host)?.name;
+  // The leader manages the room: every change is a command to the engine.
+  const own = lobby.owner === pid;
+  const cmd = player.command.bind(player);
   const world = getWorld(lobby.world);
   const db = worldDb(world.id);
   const manual = lobby.civMode === 'manual';
-  const missing = host?.missingCivs() ?? [];
+  const missing = missingCivs(lobby);
   const share = async () => {
     try {
       if (navigator.share) await navigator.share({ title: 'Epoch Draft', url: link });
@@ -414,15 +428,12 @@ function Lobby(props: {
           добавить токен в ссылку
         </label>
       </div>
-      {host ? (
+      {own ? (
         <label class="check">
           <input
             type="checkbox"
-            checked={!!host.lobby.public}
-            onChange={(e) => {
-              host.setPublic(e.currentTarget.checked);
-              props.refresh();
-            }}
+            checked={!!lobby.public}
+            onChange={(e) => cmd({ op: 'setPublic', on: e.currentTarget.checked })}
           />
           Открытая игра: видна всем в списке на главном экране
         </label>
@@ -435,29 +446,16 @@ function Lobby(props: {
       </h2>
       <SeatList
         players={lobby.players}
-        onApply={
-          host &&
-          ((ids) => {
-            host.reorder(ids);
-            props.refresh();
-          })
-        }
+        onApply={own ? (ids) => cmd({ op: 'reorder', ids }) : undefined}
         row={(p) => (
           <>
             <span class={`dot ${p.bot || snap.presence[p.id] ? 'on' : ''}`} />
             <span class="seat-name">{p.name}</span>
             {manual && <span class="muted small">{p.civ ? db.civ(p.civ).name : p.bot ? 'случайно' : 'выбирает…'}</span>}
-            {p.id === lobby.host && <span class="tag">хост</span>}
+            {p.id === lobby.owner && <span class="tag">ведущий</span>}
             {p.id === pid && <span class="tag">вы</span>}
-            {host && p.id !== lobby.host && (
-              <button
-                class="icon"
-                aria-label="Убрать"
-                onClick={() => {
-                  host.removePlayer(p.id);
-                  props.refresh();
-                }}
-              >
+            {own && p.id !== lobby.owner && (
+              <button class="icon" aria-label="Убрать" onClick={() => cmd({ op: 'removePlayer', pid: p.id })}>
                 ×
               </button>
             )}
@@ -465,23 +463,17 @@ function Lobby(props: {
         )}
       />
       {!inLobby && lobby.players.length >= MAX_PLAYERS && <p class="error">Комната заполнена.</p>}
-      {!host && snap.presence[lobby.host] === false && (
+      {!engineOnline(snap) && (
         <p class="error small">
-          Хост{hostName ? ` (${hostName})` : ''} сейчас не в комнате: выбор цивилизации и другие изменения применятся, когда
-          хост вернётся.
+          Игру считает {engineWhere(snap, pid)}, сейчас не в сети: выбор цивилизации и другие изменения применятся, когда
+          он снова будет в сети.
         </p>
       )}
 
       <h2>Мир</h2>
-      {host && worlds.length > 1 ? (
+      {own && worlds.length > 1 ? (
         <>
-          <WorldSelect
-            value={world.id}
-            onChange={(id) => {
-              host.setWorld(id);
-              props.refresh();
-            }}
-          />
+          <WorldSelect value={world.id} onChange={(id) => cmd({ op: 'setWorld', world: id })} />
           {world.description && <p class="small muted world-desc">{world.description}</p>}
         </>
       ) : (
@@ -492,7 +484,7 @@ function Lobby(props: {
       )}
 
       <h2>Цивилизации</h2>
-      {host ? (
+      {own ? (
         <div class="segmented" role="radiogroup" aria-label="Цивилизации">
           {(['random', 'manual'] as const).map((m) => (
             <button
@@ -500,10 +492,7 @@ function Lobby(props: {
               role="radio"
               aria-checked={(lobby.civMode ?? 'random') === m}
               class={(lobby.civMode ?? 'random') === m ? 'active' : ''}
-              onClick={() => {
-                host.setCivMode(m);
-                props.refresh();
-              }}
+              onClick={() => cmd({ op: 'setCivMode', mode: m })}
             >
               {m === 'random' ? '🎲 Случайно' : '✋ Выбор игроков'}
             </button>
@@ -514,25 +503,12 @@ function Lobby(props: {
       )}
       {manual && inLobby && <CivPicker db={db} lobby={lobby} pid={pid} player={props.player} />}
 
-      {host ? (
+      {own ? (
         <div class="stack">
-          <button
-            disabled={lobby.players.length >= MAX_PLAYERS}
-            onClick={() => {
-              host.addBot();
-              props.refresh();
-            }}
-          >
+          <button disabled={lobby.players.length >= MAX_PLAYERS} onClick={() => cmd({ op: 'addBot' })}>
             Добавить бота
           </button>
-          <button
-            class="primary"
-            disabled={!host.canStart()}
-            onClick={() => {
-              host.startGame();
-              props.refresh();
-            }}
-          >
+          <button class="primary" disabled={!canStart(lobby)} onClick={() => cmd({ op: 'start' })}>
             Начать игру
           </button>
           {lobby.players.length < MIN_PLAYERS && (
@@ -545,8 +521,10 @@ function Lobby(props: {
           )}
         </div>
       ) : (
-        <p class="muted">Ждём, пока хост начнёт игру…</p>
+        <p class="muted">Ждём, пока ведущий начнёт игру…</p>
       )}
+      <h2>Где идёт игра</h2>
+      <EnginePanel snap={snap} pid={pid} player={player} />
       <button class="link" onClick={props.onLeave}>
         Выйти
       </button>
@@ -558,7 +536,7 @@ function Lobby(props: {
 /** Civilizations to pick from in the lobby (manual mode); bots get the ones left. */
 function CivPicker({ db, lobby, pid, player }: { db: Db; lobby: LobbyMsg; pid: string; player: Player }) {
   const mine = lobby.players.find((p) => p.id === pid)?.civ;
-  // A pick shows at once, before the host accepts it.
+  // A pick shows at once, before the engine accepts it.
   const [wanted, setWanted] = useState<string | null>();
   useEffect(() => setWanted(undefined), [mine]);
   const pick = (civ: string | null) => {
@@ -566,7 +544,7 @@ function CivPicker({ db, lobby, pid, player }: { db: Db; lobby: LobbyMsg; pid: s
     player.pickCiv(civ);
   };
   const owner = (id: string) => lobby.players.find((p) => p.civ === id && p.id !== pid);
-  // Taken by someone else meanwhile: the host keeps the previous pick.
+  // Taken by someone else meanwhile: the engine keeps the previous pick.
   const shown = wanted === undefined || (wanted && owner(wanted)) ? mine : wanted;
   const free = [...db.civs.keys()].filter((id) => !owner(id) && id !== shown);
   return (
@@ -587,7 +565,7 @@ function CivPicker({ db, lobby, pid, player }: { db: Db; lobby: LobbyMsg; pid: s
                   {c.img && <img class="civ-img" src={c.img} alt="" />}
                   <b>{c.name}</b> · старт: <ResIcon db={db} id={c.start} /> {db.resources.get(c.start)?.name}
                   {by && <span class="muted"> · {by.name}</span>}
-                  {c.id === shown && <span class="tag">{shown === mine ? 'ваша' : 'ждём хоста…'}</span>}
+                  {c.id === shown && <span class="tag">{shown === mine ? 'ваша' : 'ждём подтверждения…'}</span>}
                 </div>
                 <div class="small muted">
                   {c.monument.name}: {joined(stages.map((s) => effectsText(db, s.effects)), ' → ')}

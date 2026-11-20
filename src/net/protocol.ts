@@ -1,3 +1,4 @@
+import { MAX_PLAYERS, MIN_PLAYERS } from '../engine/db';
 import type { Choice, GameState, PlayerState } from '../engine/types';
 
 export const TOPIC_ROOT = 'epoch-draft';
@@ -5,6 +6,8 @@ export const TOPIC_ROOT = 'epoch-draft';
 export const ROOMS_ROOT = `${TOPIC_ROOT}/room`;
 /** Topics of a player across rooms: `epoch-draft/player/<player>/`. */
 export const PLAYERS_ROOT = `${TOPIC_ROOT}/player`;
+/** Game servers: pages or processes that run games for others. */
+export const SERVERS_ROOT = `${TOPIC_ROOT}/server`;
 
 export const topics = {
   room: (room: string) => `${ROOMS_ROOT}/${room}`,
@@ -29,9 +32,17 @@ export const topics = {
   /** A player's own setting, one topic each, kept for good (no expiry). */
   pref: (pid: string, key: PrefKey) => `${PLAYERS_ROOT}/${pid}/settings/${key}`,
   prefAll: (pid: string) => `${PLAYERS_ROOT}/${pid}/settings/+`,
-  /** Full host state, so the host can resume after a reload. */
+  /** Full engine state, so any engine can take the game over and go on. */
   hostState: (room: string) => `${ROOMS_ROOT}/${room}/host`,
-  /** When the host last moved the game on: unix time in seconds. */
+  /** Who runs the game and who leads the room: set by the leader. */
+  engine: (room: string) => `${ROOMS_ROOT}/${room}/engine`,
+  engineAll: `${ROOMS_ROOT}/+/engine`,
+  /** The leader's commands to the engine, a queue kept until applied. */
+  cmd: (room: string) => `${ROOMS_ROOT}/${room}/cmd`,
+  /** Whether a game server is online; 'offline' is also its will. */
+  serverPresence: (code: string) => `${SERVERS_ROOT}/${code}/presence`,
+  serverPresenceAll: `${SERVERS_ROOT}/+/presence`,
+  /** When the engine last moved the game on: unix time in seconds. */
   updated: (room: string) => `${ROOMS_ROOT}/${room}/updated`,
   updatedAll: `${ROOMS_ROOT}/+/updated`,
   /** Set (retained) when a participant ends the game for everyone. */
@@ -60,7 +71,12 @@ export interface LobbyPlayer {
 export type CivMode = 'random' | 'manual';
 
 export interface LobbyMsg {
-  host: string;
+  /** The leader: the player who manages the room. */
+  owner: string;
+  /** Who runs the game: the leader's id (their phone) or a server code. */
+  engine: string;
+  /** The last of the leader's commands the engine has applied. */
+  cmdSeq?: number;
   players: LobbyPlayer[];
   started: boolean;
   /** The game has been played to the end. */
@@ -80,15 +96,56 @@ export interface JoinMsg {
 }
 
 /**
- * A player's settings: the host's signals when everybody has chosen and the
- * turn can be ended. A missing topic means on.
+ * A player's settings: the leader's signals when everybody has chosen and
+ * the turn can be ended (a missing topic means on), and the code of the
+ * leader's game server.
  */
 export interface Prefs {
   sound: boolean;
   vibrate: boolean;
+  server: string;
 }
 export type PrefKey = keyof Prefs;
-export const DEFAULT_PREFS: Prefs = { sound: true, vibrate: true };
+export const DEFAULT_PREFS: Prefs = { sound: true, vibrate: true, server: '' };
+
+/**
+ * Who runs a room's game. Set by the leader; an engine that sees another id
+ * here stops at once.
+ */
+export interface EngineMsg {
+  /** The leader's player id (the game runs on their phone) or a server code. */
+  id: string;
+  owner: string;
+}
+
+/** The game runs on the leader's own phone. */
+export function onLeaderPhone(e: { id: string; owner: string }): boolean {
+  return e.id === e.owner;
+}
+
+/** What the leader can ask the engine to do. */
+export type Op =
+  | { op: 'setWorld'; world: string }
+  | { op: 'setCivMode'; mode: CivMode }
+  | { op: 'setPublic'; on: boolean }
+  | { op: 'addBot' }
+  | { op: 'removePlayer'; pid: string }
+  | { op: 'reorder'; ids: string[] }
+  | { op: 'start' }
+  | { op: 'endTurn' }
+  | { op: 'replaceWithBot'; pid: string };
+
+export type Cmd = Op & { seq: number };
+
+/**
+ * The leader's commands not yet applied, oldest first. Retained, so commands
+ * sent while no engine runs wait for one.
+ */
+export interface CmdMsg {
+  list: Cmd[];
+}
+
+export type ServerPresenceMsg = 'online' | 'offline';
 
 /** A player's presence in a room; 'offline' is also the will. */
 export type PresenceMsg = 'online' | 'offline';
@@ -147,6 +204,17 @@ export function playerView(pub: PublicState, pid: string, hand: string[]): GameS
     pending: {},
     players: players.map(({ handSize: _h, ...p }) => ({ ...p, hand: p.id === pid ? hand.slice() : [] })),
   };
+}
+
+/** Players who still have to pick a civilization before the game can start. */
+export function missingCivs(lobby: LobbyMsg): LobbyPlayer[] {
+  if (lobby.civMode !== 'manual') return [];
+  return lobby.players.filter((p) => !p.bot && !p.civ);
+}
+
+export function canStart(lobby: LobbyMsg): boolean {
+  const n = lobby.players.length;
+  return !lobby.started && n >= MIN_PLAYERS && n <= MAX_PLAYERS && missingCivs(lobby).length === 0;
 }
 
 const ROOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';

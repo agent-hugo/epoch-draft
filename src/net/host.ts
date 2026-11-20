@@ -1,6 +1,6 @@
 import { greedyBot, type Bot } from '../engine/bots';
 import type { Db } from '../engine/db';
-import { MAX_PLAYERS, MIN_PLAYERS } from '../engine/db';
+import { MAX_PLAYERS } from '../engine/db';
 import { choose, createGame, endTurn, playerIndex, reseat, RuleError, unchoose, waitingFor } from '../engine/rules';
 import type { GameState } from '../engine/types';
 import type { Bus } from './mqtt';
@@ -16,18 +16,25 @@ import {
   type LobbyPlayer,
   type CivMode,
   type LobbyMsg,
+  type CmdMsg,
+  type EngineMsg,
+  type Op,
+  canStart,
 } from './protocol';
 
-/** Turns wait for the host to end them. */
+/** Turns wait for the leader to end them. */
 const HOLD = { hold: true };
 
 /** Engine database of a world; the default world for a missing or unknown id. */
 export type WorldDbs = (world?: string) => Db;
 
 /**
- * Authoritative game host. Runs in the browser of the player who created
- * the room; all state changes go through it and are published as retained
- * messages.
+ * Authoritative game engine of one room. Runs on the leader's phone or on a
+ * game server; all state changes go through it and are published as
+ * retained messages. The leader manages the room by commands; players send
+ * joins and moves. Everything it needs is on the broker, so another engine
+ * can take over at any moment: the leader names it in the room's engine
+ * topic, and an engine that sees another name there stops.
  */
 export class Host {
   lobby: LobbyMsg;
@@ -41,14 +48,21 @@ export class Host {
   private errors = new Map<string, string>();
   /** The room was closed by a participant: never publish again. */
   private closed = false;
+  /** Another engine runs the room now: never publish again. */
+  private retired = false;
+  private started = false;
+  private retireListeners = new Set<() => void>();
+  private changeListeners = new Set<() => void>();
 
   constructor(
     private dbs: WorldDbs,
     private bus: Bus,
     private room: string,
-    hostPlayerId: string,
+    /** This engine: the leader's player id on their phone, or a server code. */
+    readonly engineId: string,
+    owner: string,
   ) {
-    this.lobby = { host: hostPlayerId, players: [], started: false };
+    this.lobby = { owner, engine: engineId, players: [], started: false };
   }
 
   /** The world of the game, or the one picked in the lobby. */
@@ -56,37 +70,123 @@ export class Host {
     return this.dbs(this.game?.world ?? this.lobby.world);
   }
 
-  /** Restores a previous session from the broker (if any) and starts listening. */
+  /** Stopped for good: the room is closed or another engine runs it. */
+  get stopped(): boolean {
+    return this.closed || this.retired;
+  }
+
+  /** Called once when another engine takes over or the room is closed. */
+  onStop(fn: () => void): void {
+    this.retireListeners.add(fn);
+  }
+
+  /** Called after every change is published. */
+  onChange(fn: () => void): void {
+    this.changeListeners.add(fn);
+  }
+
+  /** Stops publishing for good: another engine runs the room now. */
+  retire(): void {
+    if (this.stopped) return;
+    this.retired = true;
+    for (const fn of this.retireListeners) fn();
+  }
+
+  private close() {
+    if (this.stopped) return;
+    this.closed = true;
+    for (const fn of this.retireListeners) fn();
+  }
+
+  /** Restores the room from the broker (if it has started) and starts listening. */
   async start(): Promise<void> {
     this.bus.subscribe(topics.closed(this.room), (_t, payload) => {
-      if (payload) this.closed = true;
+      if (payload) this.close();
+    });
+    this.bus.subscribe(topics.engine(this.room), (_t, payload) => {
+      const e = payload as EngineMsg | null;
+      if (e && e.id !== this.engineId) this.retire();
     });
     const snapshot = await new Promise<HostSnapshot | null>((resolve) => {
       const timer = setTimeout(() => resolve(null), 1500);
+      let first = true;
       this.bus.subscribe(topics.hostState(this.room), (_t, payload) => {
-        clearTimeout(timer);
-        resolve((payload as HostSnapshot | null) ?? null);
+        if (first) {
+          first = false;
+          clearTimeout(timer);
+          resolve((payload as HostSnapshot | null) ?? null);
+          return;
+        }
+        // A late message of the engine before this one: what it overwrote is
+        // sent again.
+        const late = payload as HostSnapshot | null;
+        if (this.started && late && late.lobby?.engine !== this.engineId) {
+          this.sent.clear();
+          void this.publishAll();
+        }
       });
     });
-    if (snapshot && snapshot.lobby.host === this.lobby.host) {
-      this.lobby = snapshot.lobby;
+    if (this.stopped) return;
+    if (snapshot && snapshot.lobby.owner === this.lobby.owner) {
+      this.lobby = { ...snapshot.lobby, engine: this.engineId };
       this.game = snapshot.game;
-      // All of it is on the broker already.
+      // Most of it is on the broker already.
       for (const [topic, msg] of this.messages()) this.sent.set(topic, JSON.stringify(msg));
     }
     const fresh = !snapshot;
     for (const p of this.lobby.players) if (p.bot) this.bots.set(p.id, this.makeBot(p.id));
+    this.started = true;
+    // Retained joins, moves and commands are seen again: whatever the
+    // previous engine had not saved yet is applied now.
     this.bus.subscribe(topics.joinAll(this.room), (topic, payload) => this.onJoin(lastLevel(topic), payload as JoinMsg | null));
     this.bus.subscribe(topics.actionAll(this.room), (topic, payload) =>
       this.onAction(lastLevel(topic), payload as ActionMsg | null),
     );
+    this.bus.subscribe(topics.cmd(this.room), (_t, payload) => this.onCmd(payload as CmdMsg | null));
     await this.publishAll();
     if (fresh) await this.touch();
   }
 
+  /** Applies the leader's commands not applied yet, in order. */
+  private onCmd(msg: CmdMsg | null) {
+    if (this.stopped || !msg || !Array.isArray(msg.list)) return;
+    const list = msg.list.filter((c) => typeof c.seq === 'number').sort((a, b) => a.seq - b.seq);
+    let changed = false;
+    for (const c of list) {
+      if (c.seq <= (this.lobby.cmdSeq ?? 0)) continue;
+      this.lobby.cmdSeq = c.seq;
+      changed = true;
+      this.apply(c);
+    }
+    if (changed) void this.publishAll();
+  }
+
+  private apply(c: Op) {
+    switch (c.op) {
+      case 'setWorld':
+        return this.setWorld(c.world);
+      case 'setCivMode':
+        return this.setCivMode(c.mode);
+      case 'setPublic':
+        return this.setPublic(c.on);
+      case 'addBot':
+        return this.addBot();
+      case 'removePlayer':
+        return this.removePlayer(c.pid);
+      case 'reorder':
+        return Array.isArray(c.ids) && this.reorder(c.ids);
+      case 'start':
+        return this.startGame();
+      case 'endTurn':
+        return this.endTurn();
+      case 'replaceWithBot':
+        return this.replaceWithBot(c.pid);
+    }
+  }
+
   /** Stamps the room's update time: a new room, the start, the end of every turn. */
   private async touch(): Promise<void> {
-    if (this.closed) return;
+    if (this.stopped) return;
     await this.bus.publish(topics.updated(this.room), Math.floor(Date.now() / 1000), true);
   }
 
@@ -97,7 +197,7 @@ export class Host {
   }
 
   private onJoin(pid: string, msg: JoinMsg | null) {
-    if (this.closed || !msg || typeof msg.name !== 'string') return;
+    if (this.stopped || !msg || typeof msg.name !== 'string') return;
     const name = msg.name.trim().slice(0, 24) || 'Игрок';
     const existing = this.lobby.players.find((p) => p.id === pid);
     let player = existing;
@@ -150,12 +250,6 @@ export class Host {
     void this.publishAll();
   }
 
-  /** Players who still have to pick a civilization before the game can start. */
-  missingCivs(): LobbyPlayer[] {
-    if (this.lobby.civMode !== 'manual') return [];
-    return this.lobby.players.filter((p) => !p.bot && !p.civ);
-  }
-
   addBot(): void {
     if (this.lobby.started || this.lobby.players.length >= MAX_PLAYERS) return;
     const id = `bot-${randomId().slice(0, 6)}`;
@@ -168,7 +262,7 @@ export class Host {
   }
 
   removePlayer(pid: string): void {
-    if (this.lobby.started || pid === this.lobby.host) return;
+    if (this.lobby.started || pid === this.lobby.owner) return;
     this.lobby.players = this.lobby.players.filter((p) => p.id !== pid);
     this.bots.delete(pid);
     void this.publishAll();
@@ -180,7 +274,7 @@ export class Host {
    * withdrawn and have to be made again.
    */
   reorder(ids: string[]): void {
-    if (this.closed || this.game?.phase === 'over') return;
+    if (this.stopped || this.game?.phase === 'over') return;
     if (ids.join() === this.lobby.players.map((p) => p.id).join()) return;
     const rank = (id: string) => {
       const k = ids.indexOf(id);
@@ -206,7 +300,7 @@ export class Host {
   replaceWithBot(pid: string): void {
     const g = this.game;
     const lp = this.lobby.players.find((p) => p.id === pid);
-    if (this.closed || !g || g.phase !== 'play' || pid === this.lobby.host || !lp || lp.bot) return;
+    if (this.stopped || !g || g.phase !== 'play' || pid === this.lobby.owner || !lp || lp.bot) return;
     lp.bot = true;
     lp.name = `🤖 ${lp.name}`;
     const gp = g.players.find((p) => p.id === pid);
@@ -219,13 +313,8 @@ export class Host {
     void this.bus.publish(topics.action(this.room, pid), null, true);
   }
 
-  canStart(): boolean {
-    const n = this.lobby.players.length;
-    return !this.lobby.started && n >= MIN_PLAYERS && n <= MAX_PLAYERS && this.missingCivs().length === 0;
-  }
-
   startGame(): void {
-    if (!this.canStart()) return;
+    if (!canStart(this.lobby)) return;
     const seed = crypto.getRandomValues(new Uint32Array(1))[0]!;
     // Players sit in the order of the lobby list.
     const seats = this.lobby.players;
@@ -240,7 +329,7 @@ export class Host {
 
   private onAction(pid: string, msg: ActionMsg | null) {
     const g = this.game;
-    if (this.closed || !msg || !g || g.phase !== 'play') return;
+    if (this.stopped || !msg || !g || g.phase !== 'play') return;
     if (msg.epoch !== g.epoch || msg.turn !== g.turn) return;
     if (!g.players.some((p) => p.id === pid) || this.bots.has(pid)) return;
     const prev = g.pending[pid];
@@ -262,7 +351,7 @@ export class Host {
    */
   endTurn(): void {
     const g = this.game;
-    if (this.closed || !g) return;
+    if (this.stopped || !g) return;
     const next = endTurn(this.db, g);
     if (next === g) return;
     this.game = next;
@@ -271,7 +360,24 @@ export class Host {
     void this.publishAll().then(() => this.touch());
   }
 
+  /**
+   * Bots move at once; against bots alone there is nobody to wait for, so
+   * the turn ends as soon as the leader has chosen.
+   */
   private runBots() {
+    this.moveBots();
+    const g = this.game;
+    if (!g || g.phase !== 'play' || waitingFor(g).length) return;
+    if (!g.players.every((p) => p.id === this.lobby.owner || this.bots.has(p.id))) return;
+    const next = endTurn(this.db, g);
+    if (next === g) return;
+    this.game = next;
+    this.errors.clear();
+    this.runBots();
+    void this.publishAll().then(() => this.touch());
+  }
+
+  private moveBots() {
     while (this.game && this.game.phase === 'play') {
       const botId = waitingFor(this.game).find((id) => this.bots.has(id));
       if (!botId) return;
@@ -300,7 +406,7 @@ export class Host {
   }
 
   private async publishAll(): Promise<void> {
-    if (this.closed) return;
+    if (this.stopped) return;
     if (this.game?.phase === 'over') this.lobby.over = true;
     const pubs: Promise<void>[] = [];
     for (const [topic, msg] of this.messages()) {
@@ -310,5 +416,6 @@ export class Host {
       pubs.push(this.bus.publish(topic, msg, true));
     }
     await Promise.all(pubs);
+    if (pubs.length) for (const fn of this.changeListeners) fn();
   }
 }

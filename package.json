@@ -14,7 +14,8 @@
     "e2e": "tsx scripts/e2e-ui.ts",
     "e2e:end": "tsx scripts/e2e-end.ts",
     "retain-expiry": "tsx scripts/retain-expiry.ts",
-    "clear-rooms": "tsx scripts/clear-rooms.ts"
+    "clear-rooms": "tsx scripts/clear-rooms.ts",
+    "serve": "tsx scripts/serve.ts"
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.6",

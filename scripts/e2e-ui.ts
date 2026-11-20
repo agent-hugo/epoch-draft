@@ -39,7 +39,7 @@ async function shot(page: Page, file: string) {
 }
 
 try {
-  const host = await open('Мама');
+  let host = await open('Мама');
   await host.getByRole('button', { name: 'Создать игру' }).click();
   await host.locator('.room-code').waitFor();
   const room = (await host.locator('.room-code').textContent())!.trim();
@@ -52,7 +52,7 @@ try {
   await invited.goto(`${base}#${inviteHash('NOHOST', token!)}`);
   await invited.getByLabel('Ваше имя').fill('Гость');
   await invited.getByRole('button', { name: 'Сохранить' }).click();
-  await invited.getByText('Ждём хоста комнаты NOHOST').waitFor();
+  await invited.getByText('Ждём комнату NOHOST').waitFor();
   if (!invited.url().endsWith('#room=NOHOST')) throw new Error(`invite link left ${invited.url()}`);
   await invited.context().close();
 
@@ -104,7 +104,28 @@ try {
   const join = guest.getByRole('button', { name: `Присоединиться к игре ${room}` });
   if (await join.isVisible()) throw new Error('a private room is listed');
   await host.getByRole('checkbox', { name: /^Открытая игра/ }).check();
+
+  // A game server in a browser tab: the leader hands the room to it and
+  // goes away; the room stays open and a guest joins meanwhile.
+  const serverPage = await open('Ноутбук');
+  await serverPage.goto(`${base}#serve`);
+  const serverCode = (await serverPage.locator('.room-code').textContent())!.trim();
+  await serverPage.getByText('Пока ни одной.').waitFor();
+  await host.getByRole('textbox', { name: 'Код сервера' }).fill(serverCode);
+  await host.getByRole('button', { name: 'Запомнить' }).click();
+  await host.getByRole('button', { name: `Считать на сервере ${serverCode}` }).click();
+  await host.locator('.engine-status', { hasText: `сервер ${serverCode}` }).waitFor();
+  await serverPage.locator('.server-rooms li', { hasText: room }).waitFor({ timeout: 10000 });
+  await shot(serverPage, '1-server');
+  const hostCtx = host.context();
+  await host.close();
   await join.click({ timeout: 10000 });
+  await guest.locator('.players li', { hasText: 'Петя' }).waitFor({ timeout: 10000 });
+  await guest.locator('.engine-status', { hasText: `сервер ${serverCode}` }).waitFor();
+  await serverPage.locator('.server-rooms li', { hasText: 'Петя' }).waitFor();
+  host = await hostCtx.newPage();
+  host.on('pageerror', (e) => errors.push(`Мама: ${e.message}`));
+  await host.goto(`${base}#room=${room}`);
   await host.locator('.players li', { hasText: 'Петя' }).waitFor();
   await host.getByRole('button', { name: 'Добавить бота' }).click();
   await host.locator('.players li', { hasText: 'Бот' }).waitFor();
@@ -156,8 +177,21 @@ try {
           endChecked = true;
           await shot(host, '3-end-turn');
           await endTurn(host).getByRole('button', { name: 'Отмена' }).click();
-          await guest.getByText('ждём, пока хост завершит ход').waitFor();
+          await guest.getByText('ждём, пока ведущий завершит ход').waitFor();
           await host.locator('.banner').getByRole('button', { name: 'Завершить ход' }).click();
+          await host.waitForFunction((prev) => document.querySelector('.bar')?.textContent !== prev, before, { timeout: 15000 });
+          // The leader takes the game back to the phone mid-game; the server lets it go.
+          await host.getByRole('dialog', { name: 'Итоги хода' }).getByRole('button', { name: 'Дальше' }).click();
+          await host.getByRole('button', { name: 'Настройки' }).click();
+          await host.getByRole('button', { name: 'Считать на этом телефоне' }).click();
+          await host.locator('.engine-status', { hasText: 'этот телефон' }).waitFor();
+          await serverPage.getByText('Пока ни одной.').waitFor({ timeout: 10000 });
+          // The remembered server code is kept on the broker for good: forget it.
+          await host.getByRole('textbox', { name: 'Код сервера' }).fill('');
+          await host.getByRole('button', { name: 'Запомнить' }).click();
+          await host.getByRole('button', { name: `Считать на сервере ${serverCode}` }).waitFor({ state: 'detached' });
+          await host.getByRole('button', { name: 'Рука' }).click();
+          continue;
         } else {
           await endTurn(host).getByRole('button', { name: 'Завершить ход' }).click();
         }

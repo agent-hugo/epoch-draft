@@ -1,4 +1,4 @@
-import { randomId } from '../net/protocol';
+import { randomId, randomRoomCode } from '../net/protocol';
 
 export const DEFAULT_BROKER = 'wss://mqtt.flespi.io';
 
@@ -59,6 +59,16 @@ export const settings = {
     }
     return id;
   },
+  /** Code of the game server this browser runs on its `#serve` page. */
+  get serverCode(): string {
+    let code = load('ed:server');
+    if (!code) {
+      code = randomRoomCode();
+      save('ed:server', code);
+    }
+    return code;
+  },
+  /** A room created on this device that has not named its engine yet. */
   isHost(room: string): boolean {
     return load(`ed:host:${room}`) === '1';
   },

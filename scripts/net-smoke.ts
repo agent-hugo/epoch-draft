@@ -1,14 +1,17 @@
 /**
- * Plays a full game over a real MQTT broker: a host, two remote players
- * driven by bots through the network, and one host-side bot.
+ * Plays a full game over a real MQTT broker: the leader's phone, two remote
+ * players driven by bots through the network, and one engine-side bot. The
+ * game moves from the leader's phone to a game server and back mid-game,
+ * once right as a turn is being ended.
  * Usage: MQTT_URL=wss://... MQTT_TOKEN=... npm run net-smoke
  */
 import { greedyBot } from '../src/engine/bots';
 import { loadDb } from '../src/worlds/node';
-import { Player } from '../src/net/client';
+import { deleteRoom, Player } from '../src/net/client';
 import { Host } from '../src/net/host';
 import { Bus } from '../src/net/mqtt';
 import { playerView, randomRoomCode, topics } from '../src/net/protocol';
+import { Server } from '../src/net/server';
 import { scoreGame } from '../src/engine/scoring';
 
 const url = process.env.MQTT_URL;
@@ -20,25 +23,44 @@ if (!url || !token) {
 const cfg = { url, token };
 const db = loadDb();
 const room = `TEST${randomRoomCode()}`;
-console.log('room', room);
+const serverCode = `TESTS${randomRoomCode()}`;
+console.log('room', room, 'server', serverCode);
 
 const buses: Bus[] = [];
-function bus(pid: string) {
-  const b = new Bus(cfg, { will: { topic: topics.presence(pid, room), payload: 'offline' } });
+function bus(will: string) {
+  const b = new Bus(cfg, { will: { topic: will, payload: 'offline' } });
   buses.push(b);
   return b;
 }
 
-const hostBus = bus('alice');
-await hostBus.ready();
-const host = new Host(() => db, hostBus, room, 'alice');
-await host.start();
+// The game server, its own connection.
+const serverBus = bus(topics.serverPresence(serverCode));
+await serverBus.ready();
+const server = new Server(() => db, serverBus, serverCode);
+await server.start();
 
+const aliceBus = bus(topics.presence('alice', room));
+await aliceBus.ready();
 const players = ['alice', 'bob', 'carol'].map((id) => {
-  const p = new Player(id === 'alice' ? hostBus : bus(id), room, id, id.toUpperCase());
+  const p = new Player(id === 'alice' ? aliceBus : bus(topics.presence(id, room)), room, id, id.toUpperCase());
   p.start();
   return p;
 });
+const alice = players[0]!;
+
+// The leader's phone runs the game while the room's engine says so, as the app does.
+let phone: Host | undefined;
+let phoneRuns = 0;
+alice.subscribe((s) => {
+  const here = s.engine?.id === 'alice';
+  if (here && (!phone || phone.stopped)) {
+    phone = new Host(() => db, aliceBus, room, 'alice', 'alice');
+    phoneRuns++;
+    void phone.start();
+  } else if (!here && phone && !phone.stopped) phone.retire();
+});
+await alice.claim();
+check(alice.isOwner && alice.snapshot.engine?.id === 'alice', 'a new room runs on the leader phone');
 
 // Remote players act as soon as their hand for the current turn arrives.
 for (const p of players) {
@@ -57,39 +79,60 @@ for (const p of players) {
   });
 }
 
-await waitFor(() => host.lobby.players.length === 3, 'players joined');
-host.addBot();
-host.startGame();
-// The host player confirms every turn as soon as everybody has chosen.
-const ender = setInterval(() => host.endTurn(), 50);
+await waitFor(() => alice.snapshot.lobby?.players.length === 3, 'players joined');
+alice.command({ op: 'addBot' });
+await waitFor(() => alice.snapshot.lobby?.players.length === 4, 'bot added');
+alice.command({ op: 'start' });
+
+// The leader ends every turn once everybody has chosen, and moves the game
+// between engines on the way.
+const moves: string[] = [];
+let ended = '';
+const ender = setInterval(() => {
+  const pub = alice.snapshot.pub;
+  if (!pub || pub.phase !== 'play' || !pub.players.every((p) => pub.chosen.includes(p.id))) return;
+  const key = `${pub.epoch}-${pub.turn}`;
+  if (key === ended) return;
+  ended = key;
+  alice.command({ op: 'endTurn' });
+  if (key === '1-3') {
+    // Right after the end of the turn, before the phone has published it.
+    void alice.setEngine(serverCode);
+    moves.push('server');
+  }
+  if (key === '2-4') {
+    void alice.setEngine('alice');
+    moves.push('phone');
+  }
+}, 50);
 const t0 = Date.now();
-await waitFor(() => host.game?.phase === 'over', 'game over', 120_000);
+await waitFor(() => alice.snapshot.pub?.phase === 'over', 'game over', 120_000);
 clearInterval(ender);
-const g = host.game!;
+check(moves.join() === 'server,phone', `engine moves: ${moves}`);
+check(phoneRuns === 2, `the phone ran the game ${phoneRuns} times`);
+check(server.rooms.size === 0, 'the server let the room go');
+const g = phone!.game!;
 console.log(`game finished in ${((Date.now() - t0) / 1000).toFixed(1)}s, ${g.log.length} moves`);
+check(g.log.length === 4 * 18, `expected ${4 * 18} moves, got ${g.log.length}`);
 scoreGame(db, g).forEach((s, i) => console.log(`  ${g.players[i]!.name.padEnd(16)} ${s.total}`));
 await waitFor(() => players.every((p) => p.snapshot.pub?.phase === 'over' && p.snapshot.lobby?.over), 'clients saw the end');
 console.log('clients saw the final state');
 
-// Clean up retained messages of the test room, unless KEEP=1 asks to leave it for inspection.
-for (const t of process.env.KEEP ? [] : [
-  topics.lobby(room),
-  topics.publicState(room),
-  topics.hostState(room),
-  topics.updated(room),
-  ...['alice', 'bob', 'carol'].flatMap((id) => [
-    topics.hand(room, id),
-    topics.action(room, id),
-    topics.join(room, id),
-    topics.presence(id, room),
-  ]),
-]) {
-  await hostBus.publish(t, null, true);
-}
+// Clean up the test room and the server, unless KEEP=1 asks to leave them for inspection.
+if (!process.env.KEEP) {
+  await deleteRoom(aliceBus, room, 'net-smoke');
+  await aliceBus.publish(topics.closed(room), null, true);
+  for (const id of ['alice', 'bob', 'carol']) await aliceBus.publish(topics.presence(id, room), null, true);
+  await server.stop();
+  await aliceBus.publish(topics.serverPresence(serverCode), null, true);
+} else console.log(`room ${room} kept on the broker`);
 await Promise.all(buses.map((b) => b.end()));
-if (process.env.KEEP) console.log(`room ${room} kept on the broker`);
 console.log('ok');
 process.exit(0);
+
+function check(cond: boolean, what: string) {
+  if (!cond) throw new Error(what);
+}
 
 async function waitFor(cond: () => boolean, what: string, ms = 15_000) {
   const start = Date.now();

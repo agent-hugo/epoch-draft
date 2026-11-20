@@ -5,10 +5,10 @@ import { coinsNeeded, leftOf, playerEffects, production, rightOf, type PaymentOp
 import { DEFEAT_POINTS, handOptions, nextStageCost, SELL_COINS, VICTORY_POINTS, type CardOptions } from '../engine/rules';
 import { military, ranking, scoreGame, scorePlayer } from '../engine/scoring';
 import type { CardDef, Choice, Cost, Epoch, GameState, LogEntry, PlayerState, ScoreBreakdown } from '../engine/types';
-import type { ClientSnapshot, Player } from '../net/client';
-import type { Host } from '../net/host';
+import { engineOnline, type ClientSnapshot, type Player } from '../net/client';
 import { playerView } from '../net/protocol';
 import { ConfirmDialog, type Ask } from './dialog';
+import { EnginePanel, engineWhere } from './EnginePanel';
 import { Reference } from './Reference';
 import { SeatList } from './SeatList';
 import { settings } from './storage';
@@ -31,11 +31,10 @@ interface Props {
   pid: string;
   snap: ClientSnapshot;
   player: Player;
-  host?: Host;
   onLeave: () => void;
 }
 
-export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
+export function Game({ db, room, pid, snap, player, onLeave }: Props) {
   const [tab, setTab] = useState<Tab>('hand');
   // The tab body is the only scrolling element, so the header and the tab bar
   // never leave the screen. Each tab keeps its own scroll position.
@@ -52,7 +51,10 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
   const handFresh = snap.hand && snap.hand.epoch === pub.epoch && snap.hand.turn === pub.turn;
   const view = playerView(pub, pid, handFresh ? snap.hand!.hand : []);
   const i = view.players.findIndex((p) => p.id === pid);
-  const hostOnline = snap.lobby ? snap.presence[snap.lobby.host] !== false : true;
+  // The leader ends the turns; the engine runs the game, maybe elsewhere.
+  const own = snap.lobby?.owner === pid;
+  const running = engineOnline(snap);
+  const endTurn = () => player.command({ op: 'endTurn' });
 
   // After every resolved turn show what everybody did. Turns resolved before
   // this screen was opened (e.g. before a reload) are not shown.
@@ -65,20 +67,16 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
   const turnKey = `${pub.epoch}-${pub.turn}`;
   const open = openCard.key === turnKey ? openCard.card : undefined;
   const setOpen = (card?: string) => setOpenCard({ key: turnKey, card });
-  // When everybody has chosen, the host is asked to move on to the next turn.
+  // When everybody has chosen, the leader is asked to move on to the next turn.
   const allDone = pub.phase === 'play' && pub.players.every((p) => pub.chosen.includes(p.id));
-  // '' asks, 'cancel' leaves a banner to end the turn later, 'ok' waits for the host.
+  // '' asks, 'cancel' leaves a banner to end the turn later, 'ok' waits for the engine.
   const [endAsk, setEndAsk] = useState<'' | 'cancel' | 'ok'>('');
   useEffect(() => {
     if (!allDone) setEndAsk('');
   }, [allDone]);
-  // Against bots alone there is nobody to wait for: the turn ends at once.
-  const botsOnly = !!snap.lobby?.players.every((p) => p.id === pid || p.bot);
-  const autoEnd = !!host && botsOnly;
-  useEffect(() => {
-    if (autoEnd && allDone) host!.endTurn();
-  }, [autoEnd, allDone, turnKey]);
-  const askEnd = !!host && allDone && !autoEnd && endAsk === '' && !summary;
+  // Against bots alone there is nobody to wait for: the engine ends the turn at once.
+  const autoEnd = own && !!snap.lobby?.players.every((p) => p.id === pid || p.bot);
+  const askEnd = own && allDone && !autoEnd && endAsk === '' && !summary;
   // A beep and a short buzz when the question pops up, as the player's settings say.
   useEffect(() => {
     if (!askEnd) return;
@@ -113,32 +111,34 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
         <Neighbours db={db} state={view} i={i} />
       </header>
       {!snap.connected && <div class="banner warn">Нет связи с брокером, переподключаемся…</div>}
-      {snap.connected && !hostOnline && <div class="banner warn">Хост не в сети: игра продолжится, когда он вернётся.</div>}
+      {snap.connected && !running && (
+        <div class="banner warn">Игру считает {engineWhere(snap, pid)}, сейчас не в сети: игра продолжится, когда он вернётся.</div>
+      )}
       <div class="waiting small muted">
-        {waiting.length ? `Ждём: ${waiting.join(', ')}` : host ? 'Все сделали выбор' : 'Все сделали выбор, ждём, пока хост завершит ход'}
+        {waiting.length ? `Ждём: ${waiting.join(', ')}` : own ? 'Все сделали выбор' : 'Все сделали выбор, ждём, пока ведущий завершит ход'}
       </div>
-      {host && allDone && !autoEnd && endAsk === 'cancel' && (
+      {own && allDone && !autoEnd && endAsk === 'cancel' && (
         <div class="banner">
           Все сделали выбор.
           <button
             class="banner-action primary"
             onClick={() => {
               setEndAsk('ok');
-              host.endTurn();
+              endTurn();
             }}
           >
             Завершить ход
           </button>
         </div>
       )}
-      {host && askEnd && (
+      {askEnd && (
         <ConfirmDialog
           ask={{
             text: 'Все сделали выбор. Завершить ход и перейти к следующему?',
             ok: 'Завершить ход',
             run: () => {
               setEndAsk('ok');
-              host.endTurn();
+              endTurn();
             },
           }}
           onClose={() => setEndAsk('cancel')}
@@ -170,7 +170,7 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
         )}
         {tab === 'help' && <Reference db={db} highlightCiv={me.civ} />}
         {tab === 'settings' && (
-          <GameSettings room={room} pid={pid} snap={snap} player={player} host={host} onLeave={onLeave} />
+          <GameSettings room={room} pid={pid} snap={snap} player={player} onLeave={onLeave} />
         )}
       </main>
 
@@ -331,16 +331,16 @@ function GameSettings(props: {
   pid: string;
   snap: ClientSnapshot;
   player: Player;
-  host?: Host;
   onLeave: () => void;
 }) {
-  const { room, snap, player, host } = props;
+  const { room, pid, snap, player } = props;
   const prefs = snap.prefs;
   const [name, setName] = useState(settings.name);
   const [ending, setEnding] = useState(false);
   const [ask, setAsk] = useState<Ask>();
   const newName = name.trim();
   const lobby = snap.lobby;
+  const own = lobby?.owner === pid;
   const isBot = (id: string) => !!lobby?.players.find((p) => p.id === id)?.bot;
   return (
     <div class="stack settings-tab">
@@ -395,21 +395,24 @@ function GameSettings(props: {
         Вибрация{!canVibrate && <span class="muted"> (этот браузер не умеет)</span>}
       </label>
       <p class="small muted">
-        Хосту, когда все сделали выбор и пора завершить ход. Настройки сохраняются для вас на всех устройствах.
+        Ведущему, когда все сделали выбор и пора завершить ход. Настройки сохраняются для вас на всех устройствах.
       </p>
 
-      {host && snap.pub && (
+      <h3>Где идёт игра</h3>
+      <EnginePanel snap={snap} pid={pid} player={player} />
+
+      {own && snap.pub && (
         <>
           <h3>Игроки</h3>
           <SeatList
             players={snap.pub.players}
-            onApply={(ids) => host.reorder(ids)}
+            onApply={(ids) => player.command({ op: 'reorder', ids })}
             row={(p) => (
               <>
                 <span class={`dot ${isBot(p.id) || snap.presence[p.id] ? 'on' : ''}`} />
                 <span class="seat-name">{p.name}</span>
-                {p.id === lobby?.host && <span class="tag">хост</span>}
-                {p.id !== lobby?.host && !isBot(p.id) && (
+                {p.id === lobby?.owner && <span class="tag">ведущий</span>}
+                {p.id !== lobby?.owner && !isBot(p.id) && (
                   <button
                     class="replace"
                     onClick={() =>
@@ -417,7 +420,7 @@ function GameSettings(props: {
                         text: `Заменить игрока ${p.name} ботом до конца игры? Его отключат от партии, вернуться он не сможет.`,
                         ok: 'Заменить',
                         danger: true,
-                        run: () => host.replaceWithBot(p.id),
+                        run: () => player.command({ op: 'replaceWithBot', pid: p.id }),
                       })
                     }
                   >

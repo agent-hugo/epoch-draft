@@ -4,8 +4,14 @@ import {
   DEFAULT_PREFS,
   lastLevel,
   topics,
+  onLeaderPhone,
   type ActionMsg,
   type ClosedMsg,
+  type Cmd,
+  type CmdMsg,
+  type EngineMsg,
+  type Op,
+  type ServerPresenceMsg,
   type HandMsg,
   type JoinMsg,
   type LobbyMsg,
@@ -25,6 +31,17 @@ export interface ClientSnapshot {
   prefs: Prefs;
   /** Someone ended the game; the room's state has been wiped. */
   closed?: ClosedMsg;
+  /** Who runs the game and who leads the room. */
+  engine?: EngineMsg;
+  /** Game servers looked at: the room's and the leader's own. */
+  servers: Record<string, boolean>;
+}
+
+/** The engine of the room is online, as far as is known. */
+export function engineOnline(s: ClientSnapshot): boolean {
+  const e = s.engine;
+  if (!e) return true;
+  return onLeaderPhone(e) ? s.presence[e.owner] !== false : s.servers[e.id] === true;
 }
 
 /** The host gave this player's seat to a bot. */
@@ -45,13 +62,19 @@ export async function deleteRoom(bus: Bus, room: string, by: string): Promise<vo
 
 /** One player's connection to a room. */
 export class Player {
-  snapshot: ClientSnapshot = { presence: {}, connected: false, prefs: { ...DEFAULT_PREFS } };
+  snapshot: ClientSnapshot = { presence: {}, connected: false, prefs: { ...DEFAULT_PREFS }, servers: {} };
   private listeners = new Set<(s: ClientSnapshot) => void>();
   private cleared = false;
   /** This connection has said it is in the room (and joined, if needed). */
   private announced = false;
   /** Players whose presence is watched. */
   private watched = new Set<string>();
+  /** Servers whose presence is watched, with the SUBACK of each. */
+  private watchedServers = new Map<string, Promise<void>>();
+  /** The leader's commands not yet applied, as on the broker. */
+  private cmds: Cmd[] = [];
+  /** SUBACKs of what the leader needs to know before naming an engine. */
+  private loaded?: Promise<unknown>;
 
   constructor(
     private bus: Bus,
@@ -81,12 +104,23 @@ export class Player {
     });
     this.bus.subscribe(topics.publicState(this.room), (_t, p) => this.update({ pub: (p as PublicState) ?? undefined }));
     this.bus.subscribe(topics.hand(this.room, this.id), (_t, p) => this.update({ hand: (p as HandMsg) ?? undefined }));
-    this.bus.subscribe(topics.prefAll(this.id), (t, p) => {
-      const key = lastLevel(t);
-      if (!(key in DEFAULT_PREFS)) return;
-      const value = typeof p === 'boolean' ? p : DEFAULT_PREFS[key as PrefKey];
-      this.update({ prefs: { ...this.snapshot.prefs, [key]: value } });
+    const engine = this.bus.subscribe(topics.engine(this.room), (_t, p) => {
+      const e = (p as EngineMsg | null) ?? undefined;
+      this.update({ engine: e });
+      if (e && !onLeaderPhone(e)) void this.watchServer(e.id);
     });
+    const cmds = this.bus.subscribe(topics.cmd(this.room), (_t, p) => {
+      const list = (p as CmdMsg | null)?.list;
+      this.cmds = Array.isArray(list) ? list : [];
+    });
+    const prefs = this.bus.subscribe(topics.prefAll(this.id), (t, p) => {
+      const key = lastLevel(t) as PrefKey;
+      if (!(key in DEFAULT_PREFS)) return;
+      const value = typeof p === typeof DEFAULT_PREFS[key] ? p : DEFAULT_PREFS[key];
+      this.update({ prefs: { ...this.snapshot.prefs, [key]: value } });
+      if (key === 'server' && typeof value === 'string' && value) void this.watchServer(value);
+    });
+    this.loaded = Promise.all([engine, cmds, prefs]);
     if (this.bus.online) this.update({ connected: true });
   }
 
@@ -99,6 +133,64 @@ export class Player {
         this.update({ presence: { ...this.snapshot.presence, [p.id]: msg === 'online' } }),
       );
     }
+  }
+
+  /** Follows whether a game server is online. */
+  watchServer(code: string): Promise<void> {
+    let done = this.watchedServers.get(code);
+    if (!done) {
+      done = this.bus.subscribe(topics.serverPresence(code), (_t, msg) =>
+        this.update({ servers: { ...this.snapshot.servers, [code]: (msg as ServerPresenceMsg | null) === 'online' } }),
+      );
+      this.watchedServers.set(code, done);
+    }
+    return done;
+  }
+
+  /** This player leads the room. */
+  get isOwner(): boolean {
+    return this.snapshot.engine?.owner === this.id;
+  }
+
+  /**
+   * Makes this player the leader of a new room: unless the room already has
+   * one, the game goes to the leader's server if it is online, otherwise to
+   * this phone.
+   */
+  async claim(): Promise<void> {
+    await this.loaded;
+    if (this.snapshot.engine || this.gone) return;
+    const server = this.snapshot.prefs.server;
+    if (server) await this.watchServer(server);
+    const id = server && this.snapshot.servers[server] ? server : this.id;
+    await this.setEngine(id);
+  }
+
+  /**
+   * Hands the game to another engine (the leader only): this phone (the
+   * leader's id) or a server code. The one running it stops on seeing this.
+   */
+  setEngine(id: string): Promise<void> {
+    const owner = this.snapshot.engine?.owner ?? this.id;
+    if (owner !== this.id || this.gone) return Promise.resolve();
+    const msg: EngineMsg = { id, owner };
+    this.update({ engine: msg });
+    if (!onLeaderPhone(msg)) void this.watchServer(id);
+    return this.bus.publish(topics.engine(this.room), msg, true);
+  }
+
+  /**
+   * Asks the engine to do something (the leader only). Commands wait on the
+   * broker, in order, until the engine has applied them.
+   */
+  command(op: Op): void {
+    if (!this.isOwner || this.gone) return;
+    const applied = this.snapshot.lobby?.cmdSeq ?? 0;
+    const queue = this.cmds.filter((c) => c.seq > applied);
+    const seq = Math.max(applied, ...queue.map((c) => c.seq)) + 1;
+    queue.push({ ...op, seq });
+    this.cmds = queue;
+    void this.bus.publish(topics.cmd(this.room), { list: queue } satisfies CmdMsg, true);
   }
 
   /**
@@ -139,7 +231,7 @@ export class Player {
    * Saves a setting on the broker, for this player on every device. The
    * default is stored as no topic at all.
    */
-  setPref(key: PrefKey, value: boolean): void {
+  setPref<K extends PrefKey>(key: K, value: Prefs[K]): void {
     this.update({ prefs: { ...this.snapshot.prefs, [key]: value } });
     void this.bus.publish(topics.pref(this.id, key), value === DEFAULT_PREFS[key] ? null : value, true, false);
   }
