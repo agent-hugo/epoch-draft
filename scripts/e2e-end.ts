@@ -154,8 +154,15 @@ try {
   await host.getByRole('radio', { name: /Выбор игроков/ }).click();
   await host.getByRole('button', { name: /^Египет/ }).click();
   await guest.getByRole('button', { name: /^Египет/ }).and(guest.locator(':disabled')).waitFor();
+  // With the host away a pick waits for it, shown as such, and applies when the host is back.
+  await host.getByRole('button', { name: 'Выйти' }).click();
+  await guest.getByText(/Хост \(Мама\) сейчас не в комнате/).waitFor();
   await guest.getByRole('button', { name: /^Рим/ }).click();
+  await guest.getByRole('button', { name: /^Рим.*ждём хоста/ }).waitFor();
+  await host.getByRole('button', { name: `Войти в комнату ${room}` }).click();
   await host.locator('.players li', { hasText: 'Рим' }).waitFor();
+  await guest.getByRole('button', { name: /^Рим.*ваша/ }).waitFor();
+  check(!(await guest.getByText(/сейчас не в комнате/).isVisible()), 'the notice must go when the host is back');
   check(await host.getByRole('button', { name: 'Начать игру' }).isDisabled(), 'start must wait for every pick');
   await host.getByText(/Ещё не выбрали цивилизацию: Вася/).waitFor();
   await shot(guest, 'e0-civ-pick');

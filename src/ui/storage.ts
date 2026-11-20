@@ -68,4 +68,19 @@ export const settings = {
   clearHost(room: string): void {
     save(`ed:host:${room}`, null);
   },
+  /** Rooms opened on this device, latest first. */
+  get visited(): string[] {
+    try {
+      const v: unknown = JSON.parse(load('ed:visited') ?? '[]');
+      return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+    } catch {
+      return [];
+    }
+  },
+  visit(room: string): void {
+    save('ed:visited', JSON.stringify([room, ...this.visited.filter((r) => r !== room)].slice(0, 50)));
+  },
+  forget(room: string): void {
+    save('ed:visited', JSON.stringify(this.visited.filter((r) => r !== room)));
+  },
 };

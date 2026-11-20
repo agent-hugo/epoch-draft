@@ -257,6 +257,7 @@ function Room({ room, onLeave, onHelp }: { room: string; onLeave: () => void; on
   const [, force] = useState(0);
 
   useEffect(() => {
+    settings.visit(room);
     const bus = new Bus(
       { url: settings.brokerUrl, token: settings.token },
       { will: { topic: topics.presence(pid, room), payload: 'offline' } },
@@ -385,6 +386,7 @@ function Lobby(props: {
     );
 
   const inLobby = lobby.players.some((p) => p.id === pid);
+  const hostName = lobby.players.find((p) => p.id === lobby.host)?.name;
   const world = getWorld(lobby.world);
   const db = worldDb(world.id);
   const manual = lobby.civMode === 'manual';
@@ -463,6 +465,12 @@ function Lobby(props: {
         )}
       />
       {!inLobby && lobby.players.length >= MAX_PLAYERS && <p class="error">Комната заполнена.</p>}
+      {!host && snap.presence[lobby.host] === false && (
+        <p class="error small">
+          Хост{hostName ? ` (${hostName})` : ''} сейчас не в комнате: выбор цивилизации и другие изменения применятся, когда
+          хост вернётся.
+        </p>
+      )}
 
       <h2>Мир</h2>
       {host && worlds.length > 1 ? (
@@ -550,8 +558,17 @@ function Lobby(props: {
 /** Civilizations to pick from in the lobby (manual mode); bots get the ones left. */
 function CivPicker({ db, lobby, pid, player }: { db: Db; lobby: LobbyMsg; pid: string; player: Player }) {
   const mine = lobby.players.find((p) => p.id === pid)?.civ;
+  // A pick shows at once, before the host accepts it.
+  const [wanted, setWanted] = useState<string | null>();
+  useEffect(() => setWanted(undefined), [mine]);
+  const pick = (civ: string | null) => {
+    setWanted(civ);
+    player.pickCiv(civ);
+  };
   const owner = (id: string) => lobby.players.find((p) => p.civ === id && p.id !== pid);
-  const free = [...db.civs.keys()].filter((id) => !owner(id) && id !== mine);
+  // Taken by someone else meanwhile: the host keeps the previous pick.
+  const shown = wanted === undefined || (wanted && owner(wanted)) ? mine : wanted;
+  const free = [...db.civs.keys()].filter((id) => !owner(id) && id !== shown);
   return (
     <div class="civ-picker">
       <ul>
@@ -561,16 +578,16 @@ function CivPicker({ db, lobby, pid, player }: { db: Db; lobby: LobbyMsg; pid: s
           return (
             <li key={c.id}>
               <button
-                class={`civ-option ${c.id === mine ? 'mine' : ''}`}
+                class={`civ-option ${c.id === shown ? 'mine' : ''}`}
                 disabled={!!by}
-                aria-pressed={c.id === mine}
-                onClick={() => player.pickCiv(c.id === mine ? null : c.id)}
+                aria-pressed={c.id === shown}
+                onClick={() => pick(c.id === shown ? null : c.id)}
               >
                 <div>
                   {c.img && <img class="civ-img" src={c.img} alt="" />}
                   <b>{c.name}</b> · старт: <ResIcon db={db} id={c.start} /> {db.resources.get(c.start)?.name}
                   {by && <span class="muted"> · {by.name}</span>}
-                  {c.id === mine && <span class="tag">ваша</span>}
+                  {c.id === shown && <span class="tag">{shown === mine ? 'ваша' : 'ждём хоста…'}</span>}
                 </div>
                 <div class="small muted">
                   {c.monument.name}: {joined(stages.map((s) => effectsText(db, s.effects)), ' → ')}
@@ -583,7 +600,7 @@ function CivPicker({ db, lobby, pid, player }: { db: Db; lobby: LobbyMsg; pid: s
       <button
         class="link"
         disabled={!free.length}
-        onClick={() => player.pickCiv(free[Math.floor(Math.random() * free.length)]!)}
+        onClick={() => pick(free[Math.floor(Math.random() * free.length)]!)}
       >
         🎲 Выбрать случайную
       </button>

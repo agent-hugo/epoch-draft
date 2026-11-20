@@ -29,8 +29,8 @@ function ago(time: number): string {
 
 /**
  * Rooms on the broker, newest first: open games of others to join (while
- * their host is online), and the rooms the player is in, to enter or delete.
- * Other rooms are not shown.
+ * their host is online), and the rooms the player is in or has opened on
+ * this device, to enter or delete. Other rooms are not shown.
  */
 export function RoomList({ onEnter }: { onEnter: (room: string) => void }) {
   const pid = settings.playerId;
@@ -98,6 +98,7 @@ export function RoomList({ onEnter }: { onEnter: (room: string) => void }) {
     if (!bus) return;
     setDeleting((d) => new Set(d).add(code));
     settings.clearHost(code);
+    settings.forget(code);
     void deleteRoom(bus, code, settings.name).catch(() =>
       setDeleting((d) => {
         const next = new Set(d);
@@ -114,11 +115,12 @@ export function RoomList({ onEnter }: { onEnter: (room: string) => void }) {
   };
 
   const sorted = rooms && [...rooms.values()].sort((a, b) => (b.time ?? 0) - (a.time ?? 0));
-  const isMine = (l: LobbyMsg) => l.host === pid || l.players.some((p) => p.id === pid);
+  const visited = new Set(settings.visited);
+  const plays = (l: LobbyMsg) => l.host === pid || l.players.some((p) => p.id === pid);
   const open = sorted?.filter(
-    ({ lobby: l, hostOnline }) => hostOnline && !isMine(l) && l.public && !l.started && !l.over && l.players.length < MAX_PLAYERS,
+    ({ code, lobby: l, hostOnline }) => hostOnline && !plays(l) && !visited.has(code) && l.public && !l.started && !l.over && l.players.length < MAX_PLAYERS,
   );
-  const mine = sorted?.filter(({ lobby }) => isMine(lobby));
+  const mine = sorted?.filter(({ code, lobby }) => plays(lobby) || visited.has(code));
 
   const meta = ({ lobby, time }: RoomInfo) => {
     const hostName = lobby.players.find((p) => p.id === lobby.host)?.name;
@@ -184,7 +186,7 @@ export function RoomList({ onEnter }: { onEnter: (room: string) => void }) {
                       <span class="tag">{lobby.over ? 'игра окончена' : lobby.started ? 'идёт игра' : 'набор игроков'}</span>
                       {lobby.public && !lobby.started && <span class="tag">открытая</span>}
                       {lobby.host === pid && <span class="tag">вы хост</span>}
-                      {lobby.host !== pid && <span class="tag">вы играете</span>}
+                      {lobby.host !== pid && plays(lobby) && <span class="tag">вы играете</span>}
                     </div>
                     {meta(r)}
                     <div class="row room-actions">
