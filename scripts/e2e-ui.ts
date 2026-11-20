@@ -75,6 +75,19 @@ try {
       throw new Error('the solo host is asked to end the turn');
     await solo.getByRole('dialog', { name: 'Итоги хода' }).getByRole('button', { name: 'Дальше' }).click();
     await solo.getByRole('button', { name: 'Настройки' }).click();
+    // Signal settings are on by default and kept on the broker across reloads.
+    const sound = () => solo.getByRole('checkbox', { name: 'Звук' });
+    const vibrate = () => solo.getByRole('checkbox', { name: /^Вибрация/ });
+    if (!(await sound().isChecked()) || !(await vibrate().isChecked())) throw new Error('signals are not on by default');
+    await sound().uncheck();
+    await solo.waitForTimeout(500);
+    await solo.reload();
+    await solo.getByRole('button', { name: 'Настройки' }).click();
+    await vibrate().waitFor();
+    await solo.waitForFunction(() => !(document.querySelector('.settings-tab input[type=checkbox]') as HTMLInputElement).checked, null, { timeout: 5000 });
+    if (!(await vibrate().isChecked())) throw new Error('vibration got turned off');
+    await sound().check(); // back to the default: the topic is removed
+    await solo.waitForTimeout(500);
     await solo.getByRole('button', { name: /Завершить игру для всех/ }).click();
     await solo.getByRole('dialog').getByRole('button', { name: 'Завершить', exact: true }).click();
     await solo.getByRole('heading', { name: 'Игра завершена' }).waitFor({ timeout: 10000 });

@@ -25,6 +25,9 @@ export const topics = {
    * different rooms do not overwrite each other.
    */
   presence: (pid: string, room: string) => `${PLAYERS_ROOT}/${pid}/presence/${room}`,
+  /** A player's own setting, one topic each, kept for good (no expiry). */
+  pref: (pid: string, key: PrefKey) => `${PLAYERS_ROOT}/${pid}/settings/${key}`,
+  prefAll: (pid: string) => `${PLAYERS_ROOT}/${pid}/settings/+`,
   /** Full host state, so the host can resume after a reload. */
   hostState: (room: string) => `${ROOMS_ROOT}/${room}/host`,
   /** Set (retained) when a participant ends the game for everyone. */
@@ -69,6 +72,17 @@ export interface JoinMsg {
   /** Civilization the player wants (manual mode); null drops the pick, missing keeps it. */
   civ?: string | null;
 }
+
+/**
+ * A player's settings: the host's signals when everybody has chosen and the
+ * turn can be ended. A missing topic means on.
+ */
+export interface Prefs {
+  sound: boolean;
+  vibrate: boolean;
+}
+export type PrefKey = keyof Prefs;
+export const DEFAULT_PREFS: Prefs = { sound: true, vibrate: true };
 
 /** A player's presence in a room; 'offline' is also the will. */
 export type PresenceMsg = 'online' | 'offline';

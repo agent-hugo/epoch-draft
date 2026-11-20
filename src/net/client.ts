@@ -1,12 +1,16 @@
 import type { Choice } from '../engine/types';
 import type { Bus } from './mqtt';
 import {
+  DEFAULT_PREFS,
+  lastLevel,
   topics,
   type ActionMsg,
   type ClosedMsg,
   type HandMsg,
   type JoinMsg,
   type LobbyMsg,
+  type PrefKey,
+  type Prefs,
   type PresenceMsg,
   type PublicState,
 } from './protocol';
@@ -17,6 +21,8 @@ export interface ClientSnapshot {
   hand?: HandMsg;
   presence: Record<string, boolean>;
   connected: boolean;
+  /** This player's settings, the defaults until the broker says otherwise. */
+  prefs: Prefs;
   /** Someone ended the game; the room's state has been wiped. */
   closed?: ClosedMsg;
 }
@@ -39,7 +45,7 @@ export async function deleteRoom(bus: Bus, room: string, by: string): Promise<vo
 
 /** One player's connection to a room. */
 export class Player {
-  snapshot: ClientSnapshot = { presence: {}, connected: false };
+  snapshot: ClientSnapshot = { presence: {}, connected: false, prefs: { ...DEFAULT_PREFS } };
   private listeners = new Set<(s: ClientSnapshot) => void>();
   private cleared = false;
   /** This connection has said it is in the room (and joined, if needed). */
@@ -75,6 +81,12 @@ export class Player {
     });
     this.bus.subscribe(topics.publicState(this.room), (_t, p) => this.update({ pub: (p as PublicState) ?? undefined }));
     this.bus.subscribe(topics.hand(this.room, this.id), (_t, p) => this.update({ hand: (p as HandMsg) ?? undefined }));
+    this.bus.subscribe(topics.prefAll(this.id), (t, p) => {
+      const key = lastLevel(t);
+      if (!(key in DEFAULT_PREFS)) return;
+      const value = typeof p === 'boolean' ? p : DEFAULT_PREFS[key as PrefKey];
+      this.update({ prefs: { ...this.snapshot.prefs, [key]: value } });
+    });
     if (this.bus.online) this.update({ connected: true });
   }
 
@@ -116,6 +128,15 @@ export class Player {
   /** The room is closed or this player was replaced: nothing to publish any more. */
   get gone(): boolean {
     return !!this.snapshot.closed || replacedByBot(this.snapshot, this.id);
+  }
+
+  /**
+   * Saves a setting on the broker, for this player on every device. The
+   * default is stored as no topic at all.
+   */
+  setPref(key: PrefKey, value: boolean): void {
+    this.update({ prefs: { ...this.snapshot.prefs, [key]: value } });
+    void this.bus.publish(topics.pref(this.id, key), value === DEFAULT_PREFS[key] ? null : value, true, false);
   }
 
   rename(name: string): void {

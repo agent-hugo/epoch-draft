@@ -122,10 +122,11 @@ export class Bus {
     return [...found];
   }
 
-  publish(topic: string, payload: unknown, retain = false): Promise<void> {
+  /** `expire: false` keeps a retained message for good. */
+  publish(topic: string, payload: unknown, retain = false, expire = true): Promise<void> {
     const body = payload === null ? '' : JSON.stringify(payload);
     return new Promise((resolve, reject) => {
-      const properties = retain ? { messageExpiryInterval: RETAIN_EXPIRY_S } : undefined;
+      const properties = retain && expire ? { messageExpiryInterval: RETAIN_EXPIRY_S } : undefined;
       this.client.publish(topic, body, { qos: 1, retain, properties }, (err) => (err ? reject(err) : resolve()));
     });
   }

@@ -13,6 +13,7 @@ import { Reference } from './Reference';
 import { SeatList } from './SeatList';
 import { settings } from './storage';
 import { costText, effectsText, EPOCH_NAME, Icon, joined, resChoice, resList, TYPE_NAME, TYPE_ORDER } from './format';
+import { beep, buzz, canVibrate } from './signal';
 
 type Tab = 'hand' | 'city' | 'others' | 'help' | 'settings';
 
@@ -78,9 +79,11 @@ export function Game({ db, room, pid, snap, player, host, onLeave }: Props) {
     if (autoEnd && allDone) host!.endTurn();
   }, [autoEnd, allDone, turnKey]);
   const askEnd = !!host && allDone && !autoEnd && endAsk === '' && !summary;
-  // A short buzz when the question pops up (phones that support it; iOS does not).
+  // A beep and a short buzz when the question pops up, as the player's settings say.
   useEffect(() => {
-    if (askEnd) navigator.vibrate?.(150);
+    if (!askEnd) return;
+    if (snap.prefs.sound) beep();
+    if (snap.prefs.vibrate) buzz();
   }, [askEnd]);
   useEffect(() => {
     if (lastKey === seenTurn.current) return;
@@ -332,6 +335,7 @@ function GameSettings(props: {
   onLeave: () => void;
 }) {
   const { room, snap, player, host } = props;
+  const prefs = snap.prefs;
   const [name, setName] = useState(settings.name);
   const [ending, setEnding] = useState(false);
   const [ask, setAsk] = useState<Ask>();
@@ -376,6 +380,23 @@ function GameSettings(props: {
         Выйти в меню
       </button>
       <p class="small muted">Остальные будут ждать вашего хода, пока вы не вернётесь по коду комнаты.</p>
+
+      <h3>Сигналы</h3>
+      <label class="check">
+        <input type="checkbox" checked={prefs.sound} onChange={(e) => player.setPref('sound', e.currentTarget.checked)} />
+        Звук
+      </label>
+      <label class="check">
+        <input
+          type="checkbox"
+          checked={prefs.vibrate}
+          onChange={(e) => player.setPref('vibrate', e.currentTarget.checked)}
+        />
+        Вибрация{!canVibrate && <span class="muted"> (этот браузер не умеет)</span>}
+      </label>
+      <p class="small muted">
+        Хосту, когда все сделали выбор и пора завершить ход. Настройки сохраняются для вас на всех устройствах.
+      </p>
 
       {host && snap.pub && (
         <>
