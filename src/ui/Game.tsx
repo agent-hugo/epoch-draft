@@ -478,7 +478,10 @@ function Neighbours({ db, state, i }: { db: Db; state: GameState; i: number }) {
   );
 }
 
-/** Everything a player has, as bare icons: points, coins, army, monument, production, science. */
+/**
+ * Everything a player has, as bare icons: coins, army, monument, production,
+ * science. Victory points stay hidden until the game is over.
+ */
 function PlayerIcons({ db, state, k }: { db: Db; state: GameState; k: number }) {
   const p = state.players[k]!;
   const schools = new Map<string, number>();
@@ -487,7 +490,6 @@ function PlayerIcons({ db, state, k }: { db: Db; state: GameState; k: number }) 
   const prod = production(db, p);
   return (
     <span class="nb-icons">
-      <span>{scorePlayer(db, state, k).total}⭐</span>
       <span>{p.coins}🪙</span>
       <span>{military(db, state, k)}⚔️</span>
       <span>
