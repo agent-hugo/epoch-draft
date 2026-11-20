@@ -13,16 +13,12 @@ export const RETAIN_EXPIRY_S = 7 * 24 * 60 * 60;
 export interface MessageMeta {
   /** Sent from the retained store on subscribe rather than live. */
   retained: boolean;
-  /** When the broker received it (ms since epoch), if the broker says. */
-  time?: number;
 }
 
 export type Handler = (topic: string, payload: unknown, meta: MessageMeta) => void;
 
 function metaOf(packet: IPublishPacket): MessageMeta {
-  // flespi stamps every message with a `timestamp` user property, in seconds.
-  const ts = Number(packet.properties?.userProperties?.timestamp);
-  return { retained: packet.retain, time: ts > 0 ? ts * 1000 : undefined };
+  return { retained: packet.retain };
 }
 
 /** Thin JSON wrapper over mqtt.js with topic-filter handlers. */

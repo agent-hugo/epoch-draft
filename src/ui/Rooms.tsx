@@ -9,7 +9,7 @@ import { settings } from './storage';
 interface RoomInfo {
   code: string;
   lobby: LobbyMsg;
-  /** When the lobby last changed, if the broker says. */
+  /** When the host last moved the game on (ms since epoch), if known. */
   time?: number;
 }
 
@@ -36,20 +36,28 @@ export function RoomList({ onEnter }: { onEnter: (room: string) => void }) {
   useEffect(() => {
     const b = new Bus({ url: settings.brokerUrl, token: settings.token });
     let alive = true;
-    // Collected until both SUBACKs, then rendered and kept up to date.
+    // Collected until all SUBACKs, then rendered and kept up to date.
     const found = new Map<string, RoomInfo>();
     const closed = new Set<string>();
+    const times = new Map<string, number>();
     let loaded = false;
     const show = () => {
-      if (alive && loaded) setRooms(new Map([...found].filter(([code]) => !closed.has(code))));
+      if (!alive || !loaded) return;
+      const list = [...found].filter(([code]) => !closed.has(code));
+      setRooms(new Map(list.map(([code, r]) => [code, { ...r, time: times.get(code) }])));
     };
     b.ready()
       .then(() =>
         Promise.all([
-          b.subscribe(topics.lobbyAll, (t, p, meta) => {
+          b.subscribe(topics.lobbyAll, (t, p) => {
             const code = roomOf(t);
-            if (p) found.set(code, { code, lobby: p as LobbyMsg, time: meta.time });
+            if (p) found.set(code, { code, lobby: p as LobbyMsg });
             else found.delete(code);
+            show();
+          }),
+          b.subscribe(topics.updatedAll, (t, p) => {
+            if (typeof p === 'number' && p > 0) times.set(roomOf(t), p * 1000);
+            else times.delete(roomOf(t));
             show();
           }),
           b.subscribe(topics.closedAll, (t, p) => {

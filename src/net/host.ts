@@ -35,8 +35,7 @@ export class Host {
   private bots = new Map<string, Bot>();
   /**
    * What was last published to each retained topic: an unchanged message is
-   * not sent again, so merely opening a room keeps the lobby's broker time
-   * (the "updated" time of the room list).
+   * not sent again.
    */
   private sent = new Map<string, string>();
   private errors = new Map<string, string>();
@@ -75,12 +74,20 @@ export class Host {
       // All of it is on the broker already.
       for (const [topic, msg] of this.messages()) this.sent.set(topic, JSON.stringify(msg));
     }
+    const fresh = !snapshot;
     for (const p of this.lobby.players) if (p.bot) this.bots.set(p.id, this.makeBot(p.id));
     this.bus.subscribe(topics.joinAll(this.room), (topic, payload) => this.onJoin(lastLevel(topic), payload as JoinMsg | null));
     this.bus.subscribe(topics.actionAll(this.room), (topic, payload) =>
       this.onAction(lastLevel(topic), payload as ActionMsg | null),
     );
     await this.publishAll();
+    if (fresh) await this.touch();
+  }
+
+  /** Stamps the room's update time: a new room, the start, the end of every turn. */
+  private async touch(): Promise<void> {
+    if (this.closed) return;
+    await this.bus.publish(topics.updated(this.room), Math.floor(Date.now() / 1000), true);
   }
 
   private makeBot(id: string): Bot {
@@ -220,7 +227,7 @@ export class Host {
     this.game = createGame(this.db, { seed, players });
     this.lobby.started = true;
     this.runBots();
-    void this.publishAll();
+    void this.publishAll().then(() => this.touch());
   }
 
   private onAction(pid: string, msg: ActionMsg | null) {
@@ -253,7 +260,7 @@ export class Host {
     this.game = next;
     this.errors.clear();
     this.runBots();
-    void this.publishAll();
+    void this.publishAll().then(() => this.touch());
   }
 
   private runBots() {

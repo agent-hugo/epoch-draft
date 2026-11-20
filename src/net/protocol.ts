@@ -30,6 +30,9 @@ export const topics = {
   prefAll: (pid: string) => `${PLAYERS_ROOT}/${pid}/settings/+`,
   /** Full host state, so the host can resume after a reload. */
   hostState: (room: string) => `${ROOMS_ROOT}/${room}/host`,
+  /** When the host last moved the game on: unix time in seconds. */
+  updated: (room: string) => `${ROOMS_ROOT}/${room}/updated`,
+  updatedAll: `${ROOMS_ROOT}/+/updated`,
   /** Set (retained) when a participant ends the game for everyone. */
   closed: (room: string) => `${ROOMS_ROOT}/${room}/closed`,
 };

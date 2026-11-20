@@ -76,6 +76,7 @@ for (const t of process.env.KEEP ? [] : [
   topics.lobby(room),
   topics.publicState(room),
   topics.hostState(room),
+  topics.updated(room),
   ...['alice', 'bob', 'carol'].flatMap((id) => [
     topics.hand(room, id),
     topics.action(room, id),

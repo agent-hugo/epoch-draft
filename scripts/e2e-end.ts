@@ -273,6 +273,8 @@ try {
   await host.getByRole('button', { name: 'Выйти' }).click();
   const item = host.locator('.room-list li', { hasText: room2 });
   await item.getByText('вы хост').waitFor({ timeout: 10000 });
+  // A new room is stamped by its host: the list shows when it was updated.
+  await item.getByText('только что').waitFor({ timeout: 5000 });
   await shot(host, 'e5-rooms');
   // Enter from the list, back, then delete it.
   await host.getByRole('button', { name: `Войти в комнату ${room2}` }).click();
